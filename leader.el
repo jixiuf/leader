@@ -322,8 +322,8 @@
 
 (defcustom leader-keys
   '(("<SPC>" ("C-c" nil)
-     (?e . "C-M-")
-     (?m . "M-")                        ;spc m a=M-a
+     (?e . ("C-M-" . nil))
+     (?m . ("M-" . nil))                        ;spc m a=M-a
      (?h . ("C-h" . nil))               ;spc h k=C-h k (no modifier)
      (?c . "C-c")
      (?x . ("C-x" . "C-"))))           ;spc x f=C-x C-f (modifier=C-)
@@ -395,6 +395,71 @@ Checks for active minibuffer, isearch-mode, and custom predicates."
 (defvar which-key-this-command-keys-function #'this-command-keys
   "Dynamic variable used by which-key to get current key sequence.")
 
+(defun leader--get-esc-keymap ()
+  "Get the ESC (meta) keymap from current active keymaps."
+  (car (delq nil (mapcar (lambda (map)
+                            (let* ((esc (lookup-key map [27]))
+                                   (esc-km (if (symbolp esc)
+                                            (and (fboundp esc) (indirect-function esc))
+                                          esc)))
+                              (when (keymapp esc-km) esc-km)))
+                          (current-active-maps)))))
+
+(defun leader--filter-meta-keymap (mod)
+  "Build a filtered keymap for modifier prefix MOD.
+For M-: only entries with key-description M-x (pure meta).
+For C-M-: entries with key-description M-C-x (meta+control, no shift)."
+  (message "eeeeeeee %s" mod)
+  (let ((km (make-sparse-keymap))
+        (want-ctrl (string-match-p "C-" mod))
+        (esc (leader--get-esc-keymap)))
+    (when (keymapp esc)
+      (map-keymap
+       (lambda (key def)
+         (when (and def (not (eq def 'undefined)) (integerp key))
+           (let* ((desc (key-description (vector key))))
+             (print desc)
+             (cond
+              ((and (not want-ctrl)
+                    (string-match "M-" desc)
+                    (not (string-match "C-" desc)))
+               (define-key km (vector key) def))
+              ((and want-ctrl
+                    (string-match "C-" desc)
+                    (not (string-match "S-" desc)))
+               (define-key km (vector key) def)))))
+       )esc)
+    km)))
+
+(defun leader--which-key-show-prefix (prefix-keys)
+  "Show which-key popup for PREFIX-KEYS string (e.g. \"C-x\", \"C-c\")."
+  (when (fboundp 'which-key--create-buffer-and-show)
+    (let ((kv (vconcat (kbd prefix-keys))))
+      (which-key--create-buffer-and-show kv))))
+
+(defun leader--which-key-update (wk-keys modifier-target)
+  "Update which-key popup for current state.
+WK-KEYS is the accumulated prefix string.
+MODIFIER-TARGET is a modifier like \"M-\" or \"C-M-\" when in
+modifier-prefix mode, or nil for normal prefix display."
+  (cond
+   ;; Modifier prefix mode: use filtered keymap
+   (modifier-target
+    (let* ((km (leader--filter-meta-keymap modifier-target))
+           (prefix-vector
+            (cond
+             ((or (string= modifier-target "M-") (string= modifier-target "M-C-"))
+              [27])
+             ((or (string= modifier-target "C-M-") (string= modifier-target "C-M-"))
+              [27 3])
+             (t [27]))))
+      (when (and (fboundp 'which-key--create-buffer-and-show)
+                 (fboundp 'which-key--show-page))
+        (which-key--create-buffer-and-show prefix-vector km nil modifier-target))))
+   ;; Normal prefix: show bindings under the prefix
+   (wk-keys
+    (leader--which-key-show-prefix wk-keys))))
+
 (defun leader--prompt (keys modifier)
   "Build prompt string showing KEYS and current MODIFIER state."
   (if modifier
@@ -446,11 +511,16 @@ Each dispatch entry value can be:
          ((= len 1)
           (let* ((modifier modifier-default)
                  (keys default-prefix)
-                 (which-key-this-command-keys-function (lambda () (kbd keys)))
+                 (wk-keys keys)
+                 (which-key-this-command-keys-function (lambda () (vconcat (kbd wk-keys))))
+                 ;; which-key only shows popup when this-command is nil
+                 (this-command nil)
                  (need-read t)
                  char raw-val parsed target mod-override binding char2 prompt)
             ;; Unified read-and-dispatch loop.
             (while need-read
+              (setq wk-keys keys)
+              (leader--which-key-update wk-keys nil)
               (setq prompt (leader--prompt keys modifier))
               (setq char (read-event prompt))
               (setq raw-val (alist-get char dispatch-alist))
@@ -477,7 +547,16 @@ Each dispatch entry value can be:
                     (setq keys (if (string= keys default-prefix)
                                    prefix
                                  (concat keys " " prefix)))))
-                (setq char2 (read-event (leader--prompt keys modifier)))
+                ;; Build wk-keys for which-key: convert modifier prefix to
+                ;; its Emacs key prefix.  E.g. "M-" -> "ESC", "C-M-" -> "C-x @ a"
+                ;; For a bare modifier like "M-", which-key needs the ESC prefix.
+                (setq wk-keys
+                      (let ((mod target))
+                        (cond
+                         ((string= mod "M-") "ESC")
+                         (t keys))))
+                (leader--which-key-update wk-keys target)
+                (setq char2 (read-event target))
                 (setq keys (if (string= keys default-prefix)
                                (concat target (single-key-description char2))
                              (concat keys " " target (single-key-description char2))))
@@ -524,6 +603,8 @@ Each dispatch entry value can be:
             (while (not (or (commandp binding t) (null binding)))
               (setq need-read t)
               (while need-read
+                (setq wk-keys keys)
+                (leader--which-key-update wk-keys nil)
                 (setq prompt (leader--prompt keys modifier))
                 (setq char (read-event prompt))
                 (setq raw-val (alist-get char dispatch-alist))
@@ -546,7 +627,13 @@ Each dispatch entry value can be:
                          (prefix (when (cdr parts)
                                    (string-join (butlast parts) " "))))
                     (setq keys (concat keys " " (or prefix "")))
-                    (setq char2 (read-event (leader--prompt keys modifier))))
+                     (setq wk-keys
+                           (let ((mod target))
+                             (cond
+                              ((string= mod "M-") (concat keys " ESC"))
+                              (t keys))))
+                     (leader--which-key-update wk-keys target)
+                     (setq char2 (read-event target)))
                   (setq keys (concat keys " " target (single-key-description char2)))
                   (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
                   (setq need-read nil))
@@ -584,6 +671,7 @@ Each dispatch entry value can be:
                   (setq modifier modifier-default)
                   (setq need-read nil))))
               (setq binding (key-binding (kbd keys))))
+            (when (fboundp 'which-key--hide-popup) (which-key--hide-popup))
             (kbd keys)))
          (t
           (vector leader)))))))
