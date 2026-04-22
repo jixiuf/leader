@@ -46,28 +46,38 @@
 ;;   (LEADER-KEY DEFAULT-PREFIX [DISPATCH-ENTRY ...])
 ;;
 ;; - LEADER-KEY      A key description string (e.g. "<SPC>", ",").
-;; - DEFAULT-PREFIX  Either a string or a list (STRING BOOL).
-;;                   As a string (e.g. "C-c"): ctrl-on defaults to t
-;;                   (auto-add C- to subsequent keys).
-;;                   As a list (e.g. ("C-c" nil)): ctrl-on defaults
-;;                   to the specified BOOL value.
+;; - DEFAULT-PREFIX  Either a string or a list (STRING MODIFIER).
+;;                   As a string (e.g. "C-c"): modifier defaults to
+;;                   "C-" (auto-add C- to subsequent keys).
+;;                   As a list: modifier defaults to MODIFIER, which
+;;                   is a string like "C-", "M-", or nil for no modifier.
+;;                   Examples:
+;;                     "C-c"          modifier-default = "C-"
+;;                     ("C-c" nil)    modifier-default = nil
+;;                     ("C-c" "C-")   modifier-default = "C-"
+;;                     ("C-c" "M-")   modifier-default = "M-"
 ;; - DISPATCH-ENTRY  An alist entry (CHAR . TARGET) that overrides
 ;;                   the default prefix for a specific first keystroke.
 ;;
-;; Example -- single leader with ctrl-on=t (default):
+;; Example -- single leader with modifier-default="C-" (default):
 ;;
 ;;   (setq leader-keys
-;;       '(("<SPC>" "C-c"    ; ctrl-on=t, SPC f -> C-c C-f, SPC SPC f -> C-c f
+;;       '(("<SPC>" "C-c"    ; modifier="C-", SPC f -> C-c C-f, SPC SPC f -> C-c f
 ;;          (?h . "C-h")     ; SPC h f -> C-h C-f, SPC h SPC f -> C-h f
 ;;          (?x . "C-x"))))  ; SPC x f -> C-x C-f, SPC x SPC f -> C-x f
 ;;
-;; Example -- single leader with ctrl-on=nil:
+;; Example -- single leader with modifier-default=nil:
 ;;
 ;;   (setq leader-keys
-;;    '(("<SPC>" ("C-c" nil)    ; ctrl-on=nil, SPC f->C-c f, SPC SPC f->C-c C-f
+;;    '(("<SPC>" ("C-c" nil)    ; modifier=nil, SPC f->C-c f, SPC SPC f->C-c C-f
 ;;     (?h . ("C-h" . nil))    ; SPC h a -> C-h a, SPC h SPC a -> C-h C-a
-;;     (?\s . "C-")            ; SPC SPC toggles ctrl-on
-;;     (?x . ("C-x" . t)))))   ; SPC x f -> C-x C-f, SPC x SPC f -> C-x f
+;;     (?x . ("C-x" . "C-")))))  ; SPC x f -> C-x C-f, SPC x SPC f -> C-x f
+;;
+;; Example -- leader with modifier-default="M-":
+;;
+;;   (setq leader-keys
+;;    '(("<SPC>" ("C-c" "M-")   ; modifier="M-", SPC f -> C-c M-f
+;;       (?x . ("C-x" . "C-"))))) ; SPC x f -> C-x C-f
 ;;
 ;; Example -- multiple leaders:
 ;;
@@ -81,23 +91,24 @@
 ;; 3.  Dispatch entry types
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;; 3a.  Prefix switch  --  (CHAR . "C-x")  or  (CHAR . ("C-x" . BOOL))
+;; 3a.  Prefix switch  --  (CHAR . "C-x")  or  (CHAR . ("C-x" . MODIFIER))
 ;;
 ;;   Replaces the default prefix entirely.
 ;;
-;;   Simple form -- ctrl-on resets to ctrl-default after dispatch:
-;;     (?x . "C-x")    SPC x f   -> C-x C-f  (if ctrl-default=t)
-;;     (?h . "C-h")    SPC h k   -> C-h k    (if ctrl-default=t,
+;;   Simple form -- modifier resets to modifier-default after dispatch:
+;;     (?x . "C-x")    SPC x f   -> C-x C-f  (if modifier-default="C-")
+;;     (?h . "C-h")    SPC h k   -> C-h k    (if modifier-default="C-",
 ;;                                             but C-h C-k has no binding)
 ;;
-;;   Extended form -- ctrl-on is set to the specified value:
-;;     (?x . ("C-x" . t))      SPC x f   -> C-x C-f  (ctrl-on forced to t)
-;;     (?h . ("C-h" . nil))    SPC h k   -> C-h k    (ctrl-on forced to nil,
-;;                                                     plain key preferred)
+;;   Extended form -- modifier is set to the specified value:
+;;     (?x . ("C-x" . "C-"))    SPC x f   -> C-x C-f  (modifier forced to "C-")
+;;     (?h . ("C-h" . nil))     SPC h k   -> C-h k    (modifier forced to nil,
+;;                                                      plain key preferred)
+;;     (?g . ("C-x" . "M-"))    SPC g f   -> C-x M-f  (modifier forced to "M-")
 ;;
 ;;   This is useful when different prefixes have different conventions:
-;;   C-x typically uses C-<key> (e.g. C-x C-f, C-x C-s), so force t.
-;;   C-h typically uses plain keys (e.g. C-h k, C-h f), so force nil.
+;;   C-x typically uses C-<key> (e.g. C-x C-f, C-x C-s), so set "C-".
+;;   C-h typically uses plain keys (e.g. C-h k, C-h f), so set nil.
 ;;
 ;; 3b.  Modifier prefix  --  (CHAR . "M-")   (value ends with "-")
 ;;
@@ -106,97 +117,89 @@
 ;;     (?r . "M-")     SPC r x   -> M-x      (execute-extended-command)
 ;;     (?e . "C-M-")   SPC e f   -> C-M-f    (forward-sexp)
 ;;
-;; 3c.  Control toggle  --  (CHAR . "C-")  or implicit via leader key
+;; 3c.  Modifier toggle  --  (CHAR . "C-")  or implicit via leader key
 ;;
 ;;   Pressing a key dispatched to "C-", or pressing the leader key
-;;   itself when it has no dispatch entry, toggles ctrl-on to the
-;;   OPPOSITE of ctrl-default.  This means the leader key always
-;;   doubles as a "C-" toggle without explicit configuration.
+;;   itself when it has no dispatch entry, toggles the modifier state.
 ;;
-;;   ctrl-default is determined by the DEFAULT-PREFIX configuration:
+;;   The toggle switches between modifier-default and nil (or "C-"
+;;   if modifier-default is also nil):
 ;;
-;;   ┌──────────────────────────────┬────────────────────────┐
-;;   │ DEFAULT-PREFIX               │ ctrl-default           │
-;;   ├──────────────────────────────┼────────────────────────┤
-;;   │ "C-c"  (plain string)       │ t   (add C-)           │
-;;   │ ("C-c" t)                   │ t   (add C-)           │
-;;   │ ("C-c" nil)                 │ nil (no C-)            │
-;;   └──────────────────────────────┴────────────────────────┘
+;;   ┌──────────────────────────────┬─────────────────┬──────────────┐
+;;   │ DEFAULT-PREFIX               │ modifier-default│ toggle-target│
+;;   ├──────────────────────────────┼─────────────────┼──────────────┤
+;;   │ "C-c"  (plain string)       │ "C-"            │ nil          │
+;;   │ ("C-c" "C-")                │ "C-"            │ nil          │
+;;   │ ("C-c" nil)                 │ nil             │ "C-"         │
+;;   │ ("C-c" "M-")                │ "M-"            │ nil          │
+;;   └──────────────────────────────┴─────────────────┴──────────────┘
 ;;
 ;;   However, if the key sequence keys + leader-char already has a
 ;;   command binding (e.g. C-c SPC), that binding is used directly
 ;;   instead of toggling.
 ;;
-;;   In both cases, if the preferred form has no binding, it falls
-;;   back to the opposite form automatically.
-;;
-;;   You can still explicitly add (?\s . "C-") to the dispatch alist
-;;   if you want, but it is no longer required -- the leader key does
-;;   this automatically when it has no other dispatch entry.
+;;   When modifier is non-nil, keys are tried as modifier+char first,
+;;   falling back to plain char.  When modifier is nil, keys are tried
+;;   plain first, falling back to modifier-default+char.
 ;;
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;; 4.  Detailed examples of the "C-" toggle
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;; ── Example A: DEFAULT-PREFIX = "C-c" (ctrl-default=t, add C-) ──
+;; ── Example A: DEFAULT-PREFIX = "C-c" (modifier-default="C-") ────
 ;;
 ;;   (setq leader-keys
 ;;         '(("<SPC>" "C-c"
 ;;            (?h . "C-h")
 ;;            (?x . "C-x"))))
 ;;
-;;   ctrl-default = t (plain string DEFAULT-PREFIX).
+;;   modifier-default = "C-" (plain string DEFAULT-PREFIX).
 ;;   Ordinary keys are wrapped with C- first; if no binding, fall back
-;;   to plain key.
+;;   to plain key.  Pressing SPC toggles modifier to nil.
 ;;
 ;;   Keystrokes         Translation        Explanation
 ;;   ─────────────────  ─────────────────  ──────────────────────────
-;;   SPC f              C-c C-f            ctrl-on=t, try C-c C-f first
+;;   SPC f              C-c C-f            modifier="C-", try C-c C-f
 ;;   SPC f  (no C-c C-f binding)
 ;;                      C-c f              fallback to plain f
-;;   SPC x f            C-x C-f            dispatch x->C-x, then C-f
-;;   SPC h k            C-h k              dispatch h->C-h, k is plain
-;;                                         (ctrl-on=t, but C-h C-k has
-;;                                         no binding -> fall back C-h k)
+;;   SPC SPC f          C-c f              SPC toggles modifier to nil
+;;   SPC x f            C-x C-f            dispatch x->C-x, modifier="C-"
+;;   SPC h k            C-h k              dispatch h->C-h, C-h C-k has
+;;                                         no binding -> fall back C-h k
 ;;
-;; ── Example B: DEFAULT-PREFIX = ("C-c" nil) (ctrl-default=nil) ──
+;; ── Example B: DEFAULT-PREFIX = ("C-c" nil) (modifier-default=nil)─
 ;;
 ;;   (setq leader-keys
 ;;         '(("<SPC>" ("C-c" nil)
 ;;            (?h . ("C-h" . nil))
-;;            (?x . ("C-x" . t)))))
+;;            (?x . ("C-x" . "C-")))))
 ;;
-;;   ctrl-default = nil.  Ordinary keys are used plain first; if no
-;;   binding, fall back to C-<key>.
-;;   SPC itself is not in dispatch, so pressing SPC acts as implicit
-;;   "C-" toggle (sets ctrl-on=t).
+;;   modifier-default = nil.  Ordinary keys are used plain first; if
+;;   no binding, fall back to modifier-default+char (no-op since nil).
+;;   Pressing SPC toggles modifier to "C-".
 ;;
 ;;   Keystrokes         Translation        Explanation
 ;;   ─────────────────  ─────────────────  ──────────────────────────
-;;   SPC f              C-c f              ctrl-on=nil, try C-c f first
-;;   SPC f  (no C-c f binding)
-;;                      C-c C-f            fallback to C-c C-f
-;;   SPC SPC f          C-c C-f            SPC = implicit "C-" toggle,
-;;                                         ctrl-on=t, then f -> C-c C-f
+;;   SPC f              C-c f              modifier=nil, plain f
+;;   SPC SPC f          C-c C-f            SPC toggles to "C-"
 ;;   SPC SPC SPC f      C-c C-f            second SPC toggles again,
-;;                                         ctrl-on=t (same direction)
-;;   SPC x f            C-x C-f            x->("C-x".t) -> ctrl-on=t
-;;   SPC h k            C-h k              h->("C-h".nil) -> ctrl-on=nil
+;;                                         modifier="C-" (same dir)
+;;   SPC x f            C-x C-f            x->("C-x"."C-") -> modifier="C-"
+;;   SPC h k            C-h k              h->("C-h".nil) -> modifier=nil
 ;;
 ;; ── Example C: "," as a second leader ──────────────────────────
 ;;
 ;;   (setq leader-keys
 ;;         '(("<SPC>" ("C-c" nil)
 ;;            (?h . ("C-h" . nil))
-;;            (?\s . "C-")
-;;            (?x . ("C-x" . t)))
+;;            (?x . ("C-x" . "C-")))
 ;;           ("," "M-o")))
 ;;
-;;   The "," leader uses plain string "M-o", so ctrl-default = t.
+;;   The "," leader uses plain string "M-o", so modifier-default = "C-".
 ;;
 ;;   Keystrokes         Translation        Explanation
 ;;   ─────────────────  ─────────────────  ──────────────────────────
-;;   , a                M-o C-a            ctrl-on=t -> try M-o C-a
+;;   , a                M-o C-a            modifier="C-" -> try M-o C-a
 ;;   , a  (no M-o C-a binding)
 ;;                      M-o a              fallback to plain a
 ;;
@@ -233,12 +236,12 @@
 ;; After the initial dispatch resolves to a key sequence, if that
 ;; sequence is bound to a prefix keymap (not a command), leader
 ;; continues reading keys.  The same dispatch rules apply at each
-;; step, and ctrl-on resets to ctrl-default after each ordinary key.
+;; step, and modifier resets to modifier-default after each ordinary key.
 ;;
-;; Example (with ctrl-default=nil, DEFAULT-PREFIX = ("C-c" nil)):
+;; Example (with modifier-default=nil, DEFAULT-PREFIX = ("C-c" nil)):
 ;;
 ;;   SPC x is dispatched to C-x (a prefix keymap).
-;;   Next key f:  ctrl-on=nil -> try C-x f, no binding -> C-x C-f
+;;   Next key f:  modifier=nil -> try C-x f, no binding -> C-x C-f
 ;;   C-x C-f is `find-file' (a command) -> done.
 ;;
 ;; Example (continuation with "C-" toggle):
@@ -246,45 +249,46 @@
 ;;   Suppose C-c C-a is a prefix keymap with sub-bindings C-c C-a b
 ;;   and C-c C-a C-c.
 ;;
-;;   SPC SPC a      -> C-c C-a (ctrl-on toggled to t by SPC dispatch)
+;;   SPC SPC a      -> C-c C-a (modifier toggled to "C-" by SPC)
 ;;   C-c C-a is a prefix, continue reading:
-;;     ctrl-on resets to nil (ctrl-default).
+;;     modifier resets to nil (modifier-default).
 ;;     Next key b:  try C-c C-a b -> bound! -> done.
 ;;
 ;;   SPC SPC a SPC c -> C-c C-a C-c
-;;     After C-c C-a, ctrl-on resets to nil.
-;;     SPC dispatches "C-" -> ctrl-on=t.
+;;     After C-c C-a, modifier resets to nil.
+;;     SPC toggles modifier to "C-".
 ;;     c -> try C-c C-a C-c -> bound! -> done.
 ;;
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-;; 7.  Per-prefix ctrl-on override
+;; 7.  Per-prefix modifier override
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;; By default, after a prefix switch dispatch, ctrl-on resets to
-;; ctrl-default.  The extended dispatch form lets you override this
-;; per prefix:
+;; By default, after a prefix switch dispatch, modifier resets to
+;; modifier-default.  The extended dispatch form lets you override
+;; this per prefix:
 ;;
-;;   (?x . ("C-x" . t))     ; after C-x, prefer C-<key>
-;;   (?h . ("C-h" . nil))   ; after C-h, prefer plain <key>
-;;   (?c . "C-c")           ; after C-c, reset to ctrl-default
+;;   (?x . ("C-x" . "C-"))   ; after C-x, prefer C-<key>
+;;   (?h . ("C-h" . nil))    ; after C-h, prefer plain <key>
+;;   (?g . ("C-x" . "M-"))   ; after C-x, prefer M-<key>
+;;   (?c . "C-c")            ; after C-c, reset to modifier-default
 ;;
-;; Example with ctrl-default=nil (because DEFAULT-PREFIX is ("C-c" nil)):
+;; Example with modifier-default=nil (DEFAULT-PREFIX = ("C-c" nil)):
 ;;
 ;;   (setq leader-keys
 ;;         '(("<SPC>" ("C-c" nil)
-;;            (?x . ("C-x" . t))          ; force ctrl-on=t after C-x
-;;            (?h . ("C-h" . nil)))))      ; force ctrl-on=nil after C-h
+;;            (?x . ("C-x" . "C-"))        ; modifier="C-" after C-x
+;;            (?h . ("C-h" . nil)))))       ; modifier=nil after C-h
 ;;
 ;;   Keystrokes         Translation        Explanation
 ;;   ─────────────────  ─────────────────  ──────────────────────────
-;;   SPC f              C-c f              ctrl-default=nil -> plain f
-;;   SPC SPC f          C-c C-f            "C-" toggle -> ctrl-on=t
-;;   SPC x f            C-x C-f            x->("C-x".t) -> ctrl-on=t
-;;   SPC x SPC f        C-x SPC C-f        after C-x, ctrl-on=t already,
+;;   SPC f              C-c f              modifier-default=nil -> plain f
+;;   SPC SPC f          C-c C-f            toggle -> modifier="C-"
+;;   SPC x f            C-x C-f            x->("C-x"."C-") -> modifier="C-"
+;;   SPC x SPC f        C-x SPC C-f        after C-x, modifier="C-",
 ;;                                         SPC is plain (C-x C-SPC has
 ;;                                         no binding -> C-x SPC prefix),
-;;                                         then f with ctrl-on=t -> C-f
-;;   SPC h k            C-h k              h->("C-h".nil) -> ctrl-on=nil
+;;                                         then f with modifier="C-" -> C-f
+;;   SPC h k            C-h k              h->("C-h".nil) -> modifier=nil
 ;;   SPC h C-k          C-h C-k            (actual C-k typed by user)
 ;;
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -293,12 +297,12 @@
 ;;
 ;;   (setq leader-keys
 ;;         '(("<SPC>" ("C-c" nil)
-;;            (?h . ("C-h" . nil))     ; SPC h -> C-h prefix, no auto C-
-;;            (?x . ("C-x" . t))      ; SPC x -> C-x prefix, force C-
-;;            (?c . "C-c")            ; SPC c -> C-c prefix (uses ctrl-default)
+;;            (?h . ("C-h" . nil))     ; SPC h -> C-h prefix, no modifier
+;;            (?x . ("C-x" . "C-"))   ; SPC x -> C-x prefix, modifier="C-"
+;;            (?c . "C-c")            ; SPC c -> C-c prefix (modifier-default)
 ;;            (?r . "M-")            ; SPC r x -> M-x
 ;;            (?e . "C-M-"))         ; SPC e f -> C-M-f
-;;           ("," "M-o")))           ; , -> M-o prefix (ctrl-default=t)
+;;           ("," "M-o")))           ; , -> M-o prefix (modifier-default="C-")
 ;;
 ;;   (setq leader-pass-through-predicates
 ;;         '(isearch-mode
@@ -320,42 +324,44 @@
   '(("<SPC>" ("C-c" nil)
      (?e . "C-M-")
      (?m . "M-")                        ;spc m a=M-a
-     (?h . ("C-h" . nil))               ;spc h k=C-h k (no auto C-)
+     (?h . ("C-h" . nil))               ;spc h k=C-h k (no modifier)
      (?c . "C-c")
-     (?x . ("C-x" . t))))              ;spc x f=C-x C-f (force C-)
+     (?x . ("C-x" . "C-"))))           ;spc x f=C-x C-f (modifier=C-)
   "List of leader key configurations.
 Each element is a list (LEADER-KEY DEFAULT-PREFIX . DISPATCH-ALIST).
 LEADER-KEY is a key description string for `keymap-set'.
-DEFAULT-PREFIX specifies the prefix and default ctrl-on behaviour.
+DEFAULT-PREFIX specifies the prefix and default modifier behaviour.
   It can be either:
-  - A string \"C-c\": ctrl-on defaults to t (auto-add C- to keys).
-  - A list (\"C-c\" BOOL): ctrl-on defaults to BOOL.
-    t means subsequent keys prefer C-<key>, nil means prefer plain key.
+  - A string \"C-c\": modifier defaults to \"C-\" (auto-add C- to keys).
+  - A list (\"C-c\" MODIFIER): modifier defaults to MODIFIER.
+    MODIFIER is a string like \"C-\" or \"M-\", or nil for no modifier.
 DISPATCH-ALIST is an alist mapping characters to dispatch targets.
 
 Each dispatch target can be either:
 - A string: e.g. \"C-x\", \"M-\", \"C-\"
-  After dispatching, ctrl-on resets to ctrl-default.
-- A cons (STRING . BOOL): e.g. (\"C-x\" . t), (\"C-h\" . nil)
-  After dispatching, ctrl-on is set to the specified BOOL value.
-  t means subsequent keys prefer C-<key>, nil means prefer plain key.
+  After dispatching, modifier resets to modifier-default.
+- A cons (STRING . MODIFIER): e.g. (\"C-x\" . \"C-\"), (\"C-h\" . nil)
+  After dispatching, modifier is set to the specified MODIFIER value.
 
 If a dispatch value (or its car) ends with \"-\" (e.g. \"M-\"),
-a second key is read and combined with the modifier.
+a second key is read and combined with the modifier prefix.
 
-The special target \"C-\" toggles the ctrl-on state between
-ctrl-default and its opposite."
+The special target \"C-\" toggles the modifier state.
+When the leader key itself is not in the dispatch alist, pressing
+it also acts as an implicit toggle."
   :group 'leader
   :type '(repeat
           (list (string :tag "Leader key")
-                (choice (string :tag "Default prefix")
+                (choice (string :tag "Default prefix (modifier=C-)")
                         (list (string :tag "Default prefix")
-                              (boolean :tag "Default ctrl-on")))
+                              (choice (string :tag "Default modifier")
+                                      (const :tag "No modifier" nil))))
                 (repeat :inline t
                         (cons (character :tag "From key")
                               (choice (string :tag "Target sequence")
                                       (cons (string :tag "Target sequence")
-                                            (boolean :tag "Force ctrl-on"))))))))
+                                            (choice (string :tag "Modifier override")
+                                                    (const :tag "No modifier" nil)))))))))
 
 (defcustom leader-pass-through-predicates '(isearch-mode minibufferp)
   "List of predicates controlling when the leader key passes through.
@@ -379,124 +385,63 @@ Each element is either:
    leader-pass-through-predicates))
 
 (defun leader--parse-dispatch (val)
-  "Parse a dispatch VAL into (TARGET . CTRL-OVERRIDE).
+  "Parse a dispatch VAL into (TARGET . MODIFIER-OVERRIDE).
 VAL can be:
 - A string like \"C-x\":       returns (\"C-x\" . default)
-- A cons (\"C-x\" . t):        returns (\"C-x\" . t)
+- A cons (\"C-x\" . \"C-\"):    returns (\"C-x\" . \"C-\")
 - A cons (\"C-x\" . nil):      returns (\"C-x\" . nil)
 The cdr of the return value is the symbol `default' when no
-ctrl-on override is specified, or a boolean (t/nil) when
+modifier override is specified, or a modifier string/nil when
 explicitly set."
   (if (consp val)
       (cons (car val) (cdr val))
     (cons val 'default)))
 
-(defun leader--make-handler (default-prefix ctrl-default dispatch-alist)
+(defun leader--make-handler (default-prefix modifier-default dispatch-alist)
   "Return a key-translation-map handler for a leader key.
 DEFAULT-PREFIX is the fallback prefix string.
-CTRL-DEFAULT is the default value of ctrl-on (t or nil).
+MODIFIER-DEFAULT is the default modifier string (e.g. \"C-\", \"M-\")
+or nil for no modifier.  It controls how subsequent ordinary keys
+are wrapped.
 DISPATCH-ALIST maps characters to dispatch targets.
-If a dispatch target is \"C-\", pressing that key toggles ctrl-on
-between CTRL-DEFAULT and its opposite.
-When the leader char itself is not in DISPATCH-ALIST, pressing it
-acts as an implicit \"C-\" toggle.
+
+When MODIFIER is non-nil, keys are tried as MODIFIER+char first,
+falling back to plain char if no binding exists.
+When MODIFIER is nil, keys are tried as plain char first,
+falling back to MODIFIER-DEFAULT+char.
+
+The leader key itself (when not in DISPATCH-ALIST) and any dispatch
+entry with target \"C-\" act as toggles: they switch MODIFIER between
+MODIFIER-DEFAULT and nil (or \"C-\" if MODIFIER-DEFAULT is also nil).
 
 Each dispatch entry value can be:
 - A string: e.g. \"C-x\", \"M-\", \"C-\"
-- A cons (STRING . BOOL): e.g. (\"C-x\" . t) to force ctrl-on=t
-  after switching to the C-x prefix."
-  (lambda (_)
-    (let* ((vkeys (this-command-keys-vector))
-           (len (length vkeys))
-           (leader (aref vkeys (1- len))))
-      (cond
-       ((leader--pass-through-p)
-        (vector leader))
-       ((= len 1)
-        (let* ((ctrl-on ctrl-default)
-               (keys default-prefix)
-               (which-key-this-command-keys-function (lambda () (kbd keys)))
-               (need-read t)
-               char raw-val parsed target ctrl-override binding char2)
-          ;; Unified read-and-dispatch loop.
-          ;; First iteration reads the first char after leader;
-          ;; subsequent iterations read continuation chars for prefix keys.
-          (while need-read
-            (setq char (read-event keys))
-            (setq raw-val (alist-get char dispatch-alist))
-            (setq parsed (leader--parse-dispatch raw-val))
-            (setq target (car parsed))
-            (setq ctrl-override (cdr parsed))
-            (cond
-             ;; "C-" dispatch: if keys + char is a command, use it;
-             ;; otherwise toggle ctrl-on and read next char
-             ((and target (string= target "C-"))
-              (let* ((desc (single-key-description char))
-                     (char-key (concat keys " " desc))
-                     (char-binding (key-binding (kbd char-key))))
-                (if (commandp char-binding t)
-                    (progn (setq keys char-key)
-                           (setq need-read nil))
-                  (setq ctrl-on (not ctrl-default)))))
-             ;; Modifier prefix ending with "-" (like "M-"): read second key and combine
-             ((and target (string-suffix-p "-" target))
-              (let* ((parts (split-string target " "))
-                     (prefix (when (cdr parts)
-                               (string-join (butlast parts) " "))))
-                (when prefix
-                  (setq keys (if (string= keys default-prefix)
-                                 prefix
-                               (concat keys " " prefix)))))
-              (setq char2 (read-event target))
-              (setq keys (if (string= keys default-prefix)
-                             (concat target (single-key-description char2))
-                           (concat keys " " target (single-key-description char2))))
-              (setq ctrl-on (if (eq ctrl-override 'default) ctrl-default ctrl-override))
-              (setq need-read nil))
-             ;; Direct match for sequences like "C-x"
-             (target
-              (setq keys (if (string= keys default-prefix)
-                             (concat target)
-                           (concat keys " " target)))
-              (setq ctrl-on (if (eq ctrl-override 'default) ctrl-default ctrl-override))
-              (setq need-read nil))
-             ;; No dispatch match: if leader char pressed, implicit "C-" toggle
-             ;; (check command binding first, then toggle ctrl-on)
-             ((and (null target) (eq char leader))
-              (let* ((desc (single-key-description char))
-                     (char-key (concat keys " " desc))
-                     (char-binding (key-binding (kbd char-key))))
-                (if (commandp char-binding t)
-                    (progn (setq keys char-key)
-                           (setq need-read nil))
-                  (setq ctrl-on (not ctrl-default)))))
-             ;; No dispatch match: apply ctrl-on logic
-             (t
-              (let* ((desc (single-key-description char))
-                     (c-key (concat keys " C-" desc))
-                     (plain-key (concat keys " " desc)))
-                (if ctrl-on
-                    (if (key-binding (kbd c-key))
-                        (setq keys c-key)
-                      (setq keys plain-key))
-                  (if (key-binding (kbd plain-key))
-                      (setq keys plain-key)
-                    (setq keys c-key))))
-              (setq ctrl-on ctrl-default)
-              (setq need-read nil))))
-          ;; Continue reading while binding is a prefix key (keymap)
-          (setq binding (key-binding (kbd keys)))
-          (while (not (or (commandp binding t) (null binding)))
-            (setq need-read t)
+- A cons (STRING . MODIFIER): e.g. (\"C-x\" . \"C-\") to set modifier
+  to \"C-\" after switching to the C-x prefix."
+  (let ((toggle-target (if modifier-default nil "C-")))
+    (lambda (_)
+      (let* ((vkeys (this-command-keys-vector))
+             (len (length vkeys))
+             (leader (aref vkeys (1- len))))
+        (cond
+         ((leader--pass-through-p)
+          (vector leader))
+         ((= len 1)
+          (let* ((modifier modifier-default)
+                 (keys default-prefix)
+                 (which-key-this-command-keys-function (lambda () (kbd keys)))
+                 (need-read t)
+                 char raw-val parsed target mod-override binding char2)
+            ;; Unified read-and-dispatch loop.
             (while need-read
               (setq char (read-event keys))
               (setq raw-val (alist-get char dispatch-alist))
               (setq parsed (leader--parse-dispatch raw-val))
               (setq target (car parsed))
-              (setq ctrl-override (cdr parsed))
+              (setq mod-override (cdr parsed))
               (cond
-               ;; "C-" dispatch: if keys + char is a command, use it;
-               ;; otherwise toggle ctrl-on and read next char
+               ;; "C-" dispatch (toggle): if keys + char is a command, use it;
+               ;; otherwise toggle modifier and read next char
                ((and target (string= target "C-"))
                 (let* ((desc (single-key-description char))
                        (char-key (concat keys " " desc))
@@ -504,23 +449,30 @@ Each dispatch entry value can be:
                   (if (commandp char-binding t)
                       (progn (setq keys char-key)
                              (setq need-read nil))
-                    (setq ctrl-on (not ctrl-default)))))
-               ;; Modifier prefix ending with "-" (like "M-")
+                    (setq modifier toggle-target))))
+               ;; Modifier prefix ending with "-" (like "M-"): read second key
                ((and target (string-suffix-p "-" target))
                 (let* ((parts (split-string target " "))
                        (prefix (when (cdr parts)
                                  (string-join (butlast parts) " "))))
-                  (setq keys (concat keys " " (or prefix "")))
-                  (setq char2 (read-event (concat keys (car (last parts))))))
-                (setq keys (concat keys " " target (single-key-description char2)))
-                (setq ctrl-on (if (eq ctrl-override 'default) ctrl-default ctrl-override))
+                  (when prefix
+                    (setq keys (if (string= keys default-prefix)
+                                   prefix
+                                 (concat keys " " prefix)))))
+                (setq char2 (read-event target))
+                (setq keys (if (string= keys default-prefix)
+                               (concat target (single-key-description char2))
+                             (concat keys " " target (single-key-description char2))))
+                (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
                 (setq need-read nil))
-               ;; Direct match in dispatch
+               ;; Direct match for sequences like "C-x"
                (target
-                (setq keys (concat keys " " target))
-                (setq ctrl-on (if (eq ctrl-override 'default) ctrl-default ctrl-override))
+                (setq keys (if (string= keys default-prefix)
+                               (concat target)
+                             (concat keys " " target)))
+                (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
                 (setq need-read nil))
-               ;; No dispatch match: if leader char pressed, implicit "C-" toggle
+               ;; No dispatch match: if leader char pressed, implicit toggle
                ((and (null target) (eq char leader))
                 (let* ((desc (single-key-description char))
                        (char-key (concat keys " " desc))
@@ -528,25 +480,94 @@ Each dispatch entry value can be:
                   (if (commandp char-binding t)
                       (progn (setq keys char-key)
                              (setq need-read nil))
-                    (setq ctrl-on (not ctrl-default)))))
-               ;; No dispatch match: apply ctrl-on logic
+                    (setq modifier toggle-target))))
+               ;; No dispatch match: apply modifier logic
                (t
                 (let* ((desc (single-key-description char))
-                       (c-key (concat keys " C-" desc))
+                       (mod-key (when modifier
+                                  (concat keys " " modifier desc)))
                        (plain-key (concat keys " " desc)))
-                  (if ctrl-on
-                      (if (key-binding (kbd c-key))
-                          (setq keys c-key)
+                  (if modifier
+                      (if (and mod-key (key-binding (kbd mod-key)))
+                          (setq keys mod-key)
                         (setq keys plain-key))
                     (if (key-binding (kbd plain-key))
                         (setq keys plain-key)
-                      (setq keys c-key))))
-                (setq ctrl-on ctrl-default)
+                      ;; fallback: try modifier-default + char
+                      (let ((fb-key (when modifier-default
+                                      (concat keys " " modifier-default desc))))
+                        (if (and fb-key (key-binding (kbd fb-key)))
+                            (setq keys fb-key)
+                          (setq keys plain-key))))))
+                (setq modifier modifier-default)
                 (setq need-read nil))))
-            (setq binding (key-binding (kbd keys))))
-          (kbd keys)))
-       (t
-        (vector leader))))))
+            ;; Continue reading while binding is a prefix key (keymap)
+            (setq binding (key-binding (kbd keys)))
+            (while (not (or (commandp binding t) (null binding)))
+              (setq need-read t)
+              (while need-read
+                (setq char (read-event keys))
+                (setq raw-val (alist-get char dispatch-alist))
+                (setq parsed (leader--parse-dispatch raw-val))
+                (setq target (car parsed))
+                (setq mod-override (cdr parsed))
+                (cond
+                 ;; "C-" dispatch (toggle)
+                 ((and target (string= target "C-"))
+                  (let* ((desc (single-key-description char))
+                         (char-key (concat keys " " desc))
+                         (char-binding (key-binding (kbd char-key))))
+                    (if (commandp char-binding t)
+                        (progn (setq keys char-key)
+                               (setq need-read nil))
+                      (setq modifier toggle-target))))
+                 ;; Modifier prefix ending with "-" (like "M-")
+                 ((and target (string-suffix-p "-" target))
+                  (let* ((parts (split-string target " "))
+                         (prefix (when (cdr parts)
+                                   (string-join (butlast parts) " "))))
+                    (setq keys (concat keys " " (or prefix "")))
+                    (setq char2 (read-event (concat keys (car (last parts))))))
+                  (setq keys (concat keys " " target (single-key-description char2)))
+                  (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
+                  (setq need-read nil))
+                 ;; Direct match in dispatch
+                 (target
+                  (setq keys (concat keys " " target))
+                  (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
+                  (setq need-read nil))
+                 ;; No dispatch match: if leader char pressed, implicit toggle
+                 ((and (null target) (eq char leader))
+                  (let* ((desc (single-key-description char))
+                         (char-key (concat keys " " desc))
+                         (char-binding (key-binding (kbd char-key))))
+                    (if (commandp char-binding t)
+                        (progn (setq keys char-key)
+                               (setq need-read nil))
+                      (setq modifier toggle-target))))
+                 ;; No dispatch match: apply modifier logic
+                 (t
+                  (let* ((desc (single-key-description char))
+                         (mod-key (when modifier
+                                    (concat keys " " modifier desc)))
+                         (plain-key (concat keys " " desc)))
+                    (if modifier
+                        (if (and mod-key (key-binding (kbd mod-key)))
+                            (setq keys mod-key)
+                          (setq keys plain-key))
+                      (if (key-binding (kbd plain-key))
+                          (setq keys plain-key)
+                        (let ((fb-key (when modifier-default
+                                        (concat keys " " modifier-default desc))))
+                          (if (and fb-key (key-binding (kbd fb-key)))
+                              (setq keys fb-key)
+                            (setq keys plain-key))))))
+                  (setq modifier modifier-default)
+                  (setq need-read nil))))
+              (setq binding (key-binding (kbd keys))))
+            (kbd keys)))
+         (t
+          (vector leader)))))))
 
 (defun leader--install ()
   "Install all leader key handlers into `key-translation-map'."
@@ -555,9 +576,9 @@ Each dispatch entry value can be:
     (let* ((leader-key (car entry))
            (prefix-spec (cadr entry))
            (default-prefix (if (consp prefix-spec) (car prefix-spec) prefix-spec))
-           (ctrl-default (if (consp prefix-spec) (cadr prefix-spec) t))
+           (modifier-default (if (consp prefix-spec) (cadr prefix-spec) "C-"))
            (dispatch-alist (cddr entry))
-           (handler (leader--make-handler default-prefix ctrl-default dispatch-alist)))
+           (handler (leader--make-handler default-prefix modifier-default dispatch-alist)))
       (keymap-set key-translation-map leader-key handler)
       (push leader-key leader--active-keys))))
 
