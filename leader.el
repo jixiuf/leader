@@ -363,8 +363,10 @@ it also acts as an implicit toggle."
                                             (choice (string :tag "Modifier override")
                                                     (const :tag "No modifier" nil)))))))))
 
-(defcustom leader-pass-through-predicates '(isearch-mode minibufferp)
+(defcustom leader-pass-through-predicates nil
   "List of predicates controlling when the leader key passes through.
+By default, minibuffer and isearch mode are always checked internally.
+This variable is for additional custom predicates.
 Each element is either:
 - A function (or lambda): called with no arguments, pass through if non-nil.
 - A symbol naming a variable: pass through if the variable is bound and non-nil."
@@ -375,14 +377,18 @@ Each element is either:
   "List of leader key strings currently registered in `key-translation-map'.")
 
 (defun leader--pass-through-p ()
-  "Return non-nil if the leader key should pass through as a normal key."
-  (seq-some
-   (lambda (pred)
-     (cond
-      ((symbolp pred) (and (boundp pred) (symbol-value pred)))
-      ((functionp pred) (funcall pred))
-      (t nil)))
-   leader-pass-through-predicates))
+  "Return non-nil if the leader key should pass through as a normal key.
+Checks for active minibuffer, isearch-mode, and custom predicates."
+  (or (active-minibuffer-window)
+      (bound-and-true-p isearch-mode)
+      (seq-some
+       (lambda (pred)
+         (cond
+          ((symbolp pred)
+           (and (boundp pred) (symbol-value pred)))
+          ((functionp pred) (funcall pred))
+          (t nil)))
+       leader-pass-through-predicates)))
 
 (defun leader--parse-dispatch (val)
   "Parse a dispatch VAL into (TARGET . MODIFIER-OVERRIDE).
