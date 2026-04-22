@@ -390,6 +390,17 @@ Checks for active minibuffer, isearch-mode, and custom predicates."
           (t nil)))
        leader-pass-through-predicates)))
 
+;; Declare as special (dynamic) variable so `let' binding works with which-key.
+;; Do NOT override if which-key already defined it.
+(defvar which-key-this-command-keys-function #'this-command-keys
+  "Dynamic variable used by which-key to get current key sequence.")
+
+(defun leader--prompt (keys modifier)
+  "Build prompt string showing KEYS and current MODIFIER state."
+  (if modifier
+      (format "%s [%s]-" keys modifier)
+    (format "%s -" keys)))
+
 (defun leader--parse-dispatch (val)
   "Parse a dispatch VAL into (TARGET . MODIFIER-OVERRIDE).
 VAL can be:
@@ -437,10 +448,11 @@ Each dispatch entry value can be:
                  (keys default-prefix)
                  (which-key-this-command-keys-function (lambda () (kbd keys)))
                  (need-read t)
-                 char raw-val parsed target mod-override binding char2)
+                 char raw-val parsed target mod-override binding char2 prompt)
             ;; Unified read-and-dispatch loop.
             (while need-read
-              (setq char (read-event keys))
+              (setq prompt (leader--prompt keys modifier))
+              (setq char (read-event prompt))
               (setq raw-val (alist-get char dispatch-alist))
               (setq parsed (leader--parse-dispatch raw-val))
               (setq target (car parsed))
@@ -465,7 +477,7 @@ Each dispatch entry value can be:
                     (setq keys (if (string= keys default-prefix)
                                    prefix
                                  (concat keys " " prefix)))))
-                (setq char2 (read-event target))
+                (setq char2 (read-event (leader--prompt keys modifier)))
                 (setq keys (if (string= keys default-prefix)
                                (concat target (single-key-description char2))
                              (concat keys " " target (single-key-description char2))))
@@ -512,7 +524,8 @@ Each dispatch entry value can be:
             (while (not (or (commandp binding t) (null binding)))
               (setq need-read t)
               (while need-read
-                (setq char (read-event keys))
+                (setq prompt (leader--prompt keys modifier))
+                (setq char (read-event prompt))
                 (setq raw-val (alist-get char dispatch-alist))
                 (setq parsed (leader--parse-dispatch raw-val))
                 (setq target (car parsed))
@@ -533,7 +546,7 @@ Each dispatch entry value can be:
                          (prefix (when (cdr parts)
                                    (string-join (butlast parts) " "))))
                     (setq keys (concat keys " " (or prefix "")))
-                    (setq char2 (read-event (concat keys (car (last parts))))))
+                    (setq char2 (read-event (leader--prompt keys modifier))))
                   (setq keys (concat keys " " target (single-key-description char2)))
                   (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
                   (setq need-read nil))
