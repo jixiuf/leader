@@ -158,6 +158,71 @@ Use `leader-pass-through-predicates` to define when the leader key should pass t
 - `leader-keys` - List of leader key configurations
 - `leader-pass-through-predicates` - List of predicates for pass-through
 
-## License
+## Comparison with Other Leader Key Packages
 
-GPL v3
+### Overview
+
+| Feature | leader.el | general.el | bind-map | evil-leader |
+|---------|----------|------------|---------|------------|
+| Works without Evil | ✓ | ✓ | ✓ | ✗ |
+| Dynamic key translation | ✓ | ✗ | ✗ | ✗ |
+| Smart fallback (C-/plain) | ✓ | ✗ | ✗ | ✗ |
+| Modifier toggle | ✓ | ✗ | ✗ | ✗ |
+| Active development | ✓ | ✓ | ✓ | ✗ (deprecated) |
+
+### leader.el vs general.el
+
+general.el is a key-definition convenience library that can also provide leader-key functionality. It works with or without Evil.
+
+**general.el Pros:**
+- Mature (2016-), well-documented
+- Works with Evil states (normal, insert, visual, etc.)
+- Integrates with `use-package`
+- Rich key-definition DSL
+- Can define keys for multiple states at once
+- Works without Evil
+
+**general.el Cons:**
+- Uses static keymaps (not dynamic translation)
+- No smart fallback between C-/plain keys
+- No modifier toggle feature
+- Requires more boilerplate for simple leader use
+
+**leader.el Pros:**
+- Uses `key-translation-map` for universal interception
+- Smart modifier system with automatic fallback
+- Per-prefix modifier override
+- Toggle between different modifier states
+- Simple configuration format
+
+**leader.el Cons:**
+- Less mature (newer package)
+- No Evil state integration
+- Requires Emacs 28.1+
+
+### leader.el vs bind-map
+
+bind-map makes keymaps available across different leader keys and Evil states. It can work without Evil.
+
+**bind-map Pros:**
+- Works without Evil
+- Supports per-major-mode keymaps
+- Mature, stable
+
+**bind-map Cons:**
+- Uses static keymaps (not dynamic translation)
+- No smart fallback
+- No modifier toggle
+- More verbose configuration
+
+### leader.el vs evil-leader
+
+evil-leader is a simple Evil-specific leader key package that has not been updated since 2014. Deprecated.
+
+### Key Differences
+
+1. **Dynamic vs Static**: leader.el uses `key-translation-map` to dynamically translate keys, while general.el and bind-map use static keymaps attached to prefix keys.
+
+2. **Smart Fallback**: leader.el automatically tries `C-x C-f`, falls back to `C-x f` if no binding. Static keymaps require explicit fallback bindings.
+
+3. **Modifier Toggle**: leader.el can toggle between `C-` and plain keys on the fly (e.g., `SPC SPC` toggles), unique among all packages.
