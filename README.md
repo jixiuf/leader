@@ -29,16 +29,20 @@ A list of leader key configurations. Each element has the form:
 ```
 
 - `LEADER-KEY`: A key description string (e.g. `"<SPC>"`, `","`).
-- `DEFAULT-PREFIX`: Either a string or a list specifying the prefix and default modifier.
+- `DEFAULT-PREFIX`: Either a string or a list specifying the prefix, modifier-default, and optionally fallback-modifier.
 
 #### DEFAULT-PREFIX Formats
 
-| Format | modifier-default | Description |
-|--------|---------------|------------|
-| `"C-c"` | `"C-"` | Auto-add C- to keys |
-| `("C-c" nil)` | `nil` | No modifier |
-| `("C-c" "C-")` | `"C-"` | Explicit C- |
-| `("C-c" "M-")` | `"M-"` | Auto-add M- |
+| Format | modifier-default | fallback-modifier | Description |
+|--------|---------------|-------------------|-------------|
+| `"C-c"` | `"C-"` | `"C-"` | Auto-add C- to keys |
+| `("C-c" nil)` | `nil` | `nil` | No modifier, no fallback |
+| `("C-c" nil "C-")` | `nil` | `"C-"` | Plain keys, fallback to C- |
+| `("C-c" "C-")` | `"C-"` | `"C-"` | Explicit C- |
+| `("C-c" "M-")` | `"M-"` | `"M-"` | Auto-add M- |
+
+The third element (`fallback-modifier`) is optional. When omitted it
+defaults to `modifier-default`.
 
 #### Examples
 
@@ -48,15 +52,15 @@ A list of leader key configurations. Each element has the form:
    (?h . "C-h")
    (?x . "C-x")))
 
-;; Single leader with modifier-default=nil
-'(("<SPC>" ("C-c" nil)
-   (?h . ("C-h" . nil))
-   (?x . ("C-x" . "C-")))
+;; Single leader with modifier-default=nil, fallback-modifier="C-"
+'(("<SPC>" ("C-c" nil "C-")
+   (?h . ("C-h" nil))
+   (?x . ("C-x" "C-")))
 
 ;; Multiple leaders
-'(("<SPC>" ("C-c" nil)
-   (?h . ("C-h" . nil))
-   (?x . ("C-x" . "C-")))
+'(("<SPC>" ("C-c" nil "C-")
+   (?h . ("C-h" nil))
+   (?x . ("C-x" "C-")))
  ("," "M-o"))
 ```
 
@@ -65,9 +69,15 @@ A list of leader key configurations. Each element has the form:
 ### Prefix Switch
 
 ```elisp
-(?x . "C-x")            ; SPC x f -> C-x C-f
-(?h . ("C-h" . nil))    ; SPC h k -> C-h k (no auto C-)
-(?g . ("C-x" . "M-"))  ; SPC g f -> C-x M-f
+(?x . "C-x")            ; SPC x f -> C-x C-f (reset to defaults)
+(?h . ("C-h" nil))      ; SPC h k -> C-h k (modifier=nil)
+(?g . ("C-x" "M-"))    ; SPC g f -> C-x M-f (modifier="M-")
+```
+
+With fallback override (third element):
+```elisp
+(?x . ("C-x" "C-" nil)) ; SPC x f -> C-x C-f (C- only, no plain fallback)
+(?h . ("C-h" nil "C-")) ; SPC h k -> C-h k (plain first, fallback to C-)
 ```
 
 ### Modifier Prefix (values ending with "-")
@@ -96,7 +106,7 @@ When modifier is non-nil:
 
 When modifier is nil:
 1. Try plain char first
-2. Fall back to `modifier-default+char` if no binding
+2. Fall back to `fallback-modifier+char` if set and binding exists
 
 ## Predicates for Pass-through
 
@@ -118,27 +128,26 @@ Use `leader-pass-through-predicates` to define when the leader key should pass t
 
 ```elisp
 (setq leader-keys
-      '(("<SPC>" ("C-c" nil)
-         (?h . ("C-h" . nil))     ; SPC h -> C-h prefix, no modifier
-         (?x . ("C-x" . "C-"))   ; SPC x -> C-x prefix, modifier="C-"
+      '(("<SPC>" ("C-c" nil "C-")  ; prefix, modifier-default, fallback-modifier
+         (?h . ("C-h" nil "C-"))  ; SPC h -> C-h prefix, plain first, fallback C-
+         (?x . ("C-x" "C-" nil)) ; SPC x -> C-x prefix, C- only, no plain fallback
          (?c . "C-c")            ; SPC c -> C-c prefix (modifier-default)
          (?r . "M-")            ; SPC r x -> M-x
          (?e . "C-M-"))         ; SPC e f -> C-M-f
         ("," "M-o")))
-
-(leader-mode 1)
 ```
 
 ## Behavior Examples
 
-### With `("C-c" nil)` (modifier-default=nil)
+### With `("C-c" nil "C-")` (modifier-default=nil, fallback-modifier="C-")
 
 | Keystrokes | Translation | Explanation |
 |------------|-------------|--------------|
-| SPC f | C-c f | modifier=nil, plain f |
+| SPC f | C-c f | modifier=nil, plain f bound |
+| SPC f (no binding) | C-c C-f | fallback to fallback-modifier+char |
 | SPC SPC f | C-c C-f | toggle -> modifier="C-" |
-| SPC x f | C-x C-f | x->("C-x"."C-") -> modifier="C-" |
-| SPC h k | C-h k | h->("C-h".nil) -> modifier=nil |
+| SPC x f | C-x C-f | x->("C-x" "C-") -> modifier="C-" |
+| SPC h k | C-h k | h->("C-h" nil) -> modifier=nil |
 
 ### With `"C-c"` (modifier-default="C-")
 
