@@ -364,10 +364,13 @@ when target is \"M-\") are excluded."
   "Clear any visible which-key popup, for all popup types."
   (when (fboundp 'which-key--hide-popup)
     (which-key--hide-popup))
+  ;; Kill the buffer to force fresh creation, preventing stale content
+  ;; from a previous popup from bleeding through.
   (when (and (boundp 'which-key--buffer)
              (buffer-live-p which-key--buffer))
-    (with-current-buffer which-key--buffer
-      (erase-buffer)))
+    (let ((buf which-key--buffer))
+      (setq which-key--buffer nil)
+      (kill-buffer buf)))
   (when (and (boundp 'which-key-popup-type)
              (eq which-key-popup-type 'minibuffer))
     (message nil)))
@@ -389,8 +392,7 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
 
 (defun leader--modifier-which-key-read (target modifier)
   "Show which-key popup filtered by TARGET modifier prefix.
-Read a character with C-h n/p paging support.  TIMER-INHIBITED,
-if non-nil, means which-key is already inhibited (don't double-bind).
+Read a character with C-h n/p paging support.
 Returns the character read."
   (let ((which-key-inhibit t)
         (paging-key (kbd which-key-paging-key))
@@ -402,6 +404,9 @@ Returns the character read."
       (let ((which-key--automatic-display t)
             (filter (leader--modifier-filter target)))
         (which-key--create-buffer-and-show nil nil filter target)))
+    (when (and which-key--pages-obj
+               (> (which-key--pages-num-pages which-key--pages-obj) 1))
+      (message "%s" (leader--which-key-page-hint)))
     ;; Read loop with C-h n/p paging
     (while (not char)
       (setq char (read-event (leader--prompt target modifier)))
@@ -413,11 +418,13 @@ Returns the character read."
             (let ((ch (read-event (leader--which-key-page-hint))))
               (cond ((eq ch ?n) (leader--which-key-next-page 1))
                     ((eq ch ?p) (leader--which-key-next-page -1))))
+            (message "%s" (leader--which-key-page-hint))
             (setq char nil))
         ;; Paging key (<f5>): next page (cycle)
         (when (and which-key-paging-key
                    (equal (vector char) paging-key))
           (leader--which-key-next-page 1)
+          (message "%s" (leader--which-key-page-hint))
           (setq char nil))))
     ;; Hide popup after key read
     (when (fboundp 'which-key--hide-popup)
