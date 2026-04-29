@@ -253,7 +253,12 @@ a second key is read and combined with the modifier prefix.
 
 The special target \"C-\" toggles the modifier state.
 When the leader key itself is not in the dispatch alist, pressing
-it also acts as an implicit toggle."
+it also acts as an implicit toggle.
+
+NOTE: Dispatch entries only apply as immediate followers of the
+leader key.  Once a prefix keymap is entered (e.g. C-c f is a
+prefix), subsequent keys use only modifier/fallback logic and the
+implicit leader toggle — they never consult the dispatch alist."
   :group 'leader
   :type '(repeat
           (list (string :tag "Leader key")
@@ -345,6 +350,11 @@ falling back to FALLBACK-MODIFIER+char if set.
 The leader key itself (when not in DISPATCH-ALIST) and any dispatch
 entry with target \"C-\" act as toggles: they switch MODIFIER between
 MODIFIER-DEFAULT and nil (or \"C-\" if MODIFIER-DEFAULT is also nil).
+
+Dispatch entries only apply as immediate followers of the leader key.
+When following a prefix keymap (e.g. the handler continues reading
+keys after a prefix binding), only modifier/fallback logic and the
+implicit leader toggle are used — the dispatch alist is not consulted.
 
 Each dispatch entry value can be:
 - A string: e.g. \"C-x\", \"M-\", \"C-\"
@@ -449,14 +459,9 @@ Each dispatch entry value can be:
               (while need-read
                 (setq prompt (leader--prompt keys modifier))
                 (setq char (read-event prompt))
-                (setq raw-val (alist-get char dispatch-alist))
-                (setq parsed (leader--parse-dispatch raw-val))
-                (setq target (car parsed))
-                (setq mod-override (cadr parsed))
-                (setq fb-override (caddr parsed))
                 (cond
-                 ;; "C-" dispatch (toggle)
-                 ((and target (string= target "C-"))
+                 ;; Leader char pressed again: implicit toggle
+                 ((eq char leader)
                   (let* ((desc (single-key-description char))
                          (char-key (concat keys " " desc))
                          (char-binding (key-binding (kbd char-key))))
@@ -464,33 +469,7 @@ Each dispatch entry value can be:
                         (progn (setq keys char-key)
                                (setq need-read nil))
                       (setq modifier toggle-target))))
-                 ;; Modifier prefix ending with "-" (like "M-")
-                 ((and target (string-suffix-p "-" target))
-                  (let* ((parts (split-string target " "))
-                         (prefix (when (cdr parts)
-                                   (string-join (butlast parts) " "))))
-                    (setq keys (concat keys " " (or prefix "")))
-                    (setq char2 (read-event (leader--prompt keys modifier))))
-                  (setq keys (concat keys " " target (single-key-description char2)))
-                  (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
-                  (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
-                  (setq need-read nil))
-                 ;; Direct match in dispatch
-                 (target
-                  (setq keys (concat keys " " target))
-                  (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
-                  (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
-                  (setq need-read nil))
-                 ;; No dispatch match: if leader char pressed, implicit toggle
-                 ((and (null target) (eq char leader))
-                  (let* ((desc (single-key-description char))
-                         (char-key (concat keys " " desc))
-                         (char-binding (key-binding (kbd char-key))))
-                    (if (commandp char-binding t)
-                        (progn (setq keys char-key)
-                               (setq need-read nil))
-                      (setq modifier toggle-target))))
-                 ;; No dispatch match: apply modifier logic
+                 ;; Continuation keys: apply modifier logic only (no dispatch)
                  (t
                   (let* ((desc (single-key-description char))
                          (mod-key (when modifier
