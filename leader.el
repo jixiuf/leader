@@ -349,23 +349,88 @@ Returns the resulting key string."
 
 ;;; which-key integration for modifier prefix dispatches
 
-(defun leader--modifier-filter (target)
-  "Return a filter lambda for which-key that matches TARGET modifier prefix.
-TARGET is a string like \"M-\" or \"C-M-\".  Sub-modifiers (e.g. M-S-*
-when target is \"M-\") are excluded."
-  (lambda (binding)
-    (let ((key (car binding)))
-      (and (string-prefix-p target key)
-           (not (string-match-p
-                 "\\`[ACHMSs]-"
-                 (substring key (length target))))))))
+(defun leader--collect-esc-bindings (keymap target seen)
+  "Collect ESC-prefix bindings from KEYMAP that match TARGET."
+  (let ((result nil))
+    (map-keymap
+     (lambda (sub-ev sub-def)
+       (cond
+        ;; Handle single key event
+        ((integerp sub-ev)
+         (let* ((meta-ev (event-apply-modifier sub-ev 'meta 27 "M-"))
+                (desc (key-description (vector meta-ev)))
+                (rest (if (string-prefix-p target desc) (substring desc (length target)) "")))
+           (leader--process-binding desc rest sub-def target seen (lambda (b) (push b result)))))
+        ;; Handle key range (e.g., (48 . 57) for 0-9)
+        ((consp sub-ev)
+         (let ((start (car sub-ev))
+               (end (cdr sub-ev)))
+           (while (<= start end)
+             (let* ((meta-ev (event-apply-modifier start 'meta 27 "M-"))
+                    (desc (key-description (vector meta-ev)))
+                    (rest (if (string-prefix-p target desc) (substring desc (length target)) "")))
+               (leader--process-binding desc rest sub-def target seen (lambda (b) (push b result))))
+             (setq start (1+ start)))))))
+     keymap)
+    result))
+
+(defun leader--binding-sort-predicate (a b)
+  "Sort predicate for modifier bindings.
+Keys with angle brackets sort after plain keys; within each
+group shorter names sort first, then alphabetically."
+  (let* ((ka (car a)) (kb (car b))
+         (ba (if (string-match-p "[<>]" ka) 1 0))
+         (bb (if (string-match-p "[<>]" kb) 1 0)))
+    (or (< ba bb)
+        (and (= ba bb)
+             (< (string-width ka) (string-width kb)))
+        (and (= ba bb)
+             (= (string-width ka) (string-width kb))
+             (string< ka kb)))))
+
+(defun leader--collect-modifier-bindings (target)
+  "Collect bindings matching TARGET prefix, handling ESC and key ranges."
+  (let ((bindings nil)
+        (seen (make-hash-table :test 'equal)))
+    (dolist (map (current-active-maps t))
+      (map-keymap
+       (lambda (ev def)
+         (cond
+          ;; Case 1: ESC prefix (covers M- and C-M- via ESC)
+          ((eq ev 27)
+           (when (keymapp def)
+             (setq bindings (nconc (leader--collect-esc-bindings def target seen) bindings))))
+          ;; Case 2: Regular keys (including direct C-M- bitmask)
+          (t
+           (let* ((desc (key-description (vector ev)))
+                  (rest (if (string-prefix-p target desc) (substring desc (length target)) "")))
+             (leader--process-binding desc rest def target seen (lambda (b) (push b bindings)))))))
+       map))
+    (sort (nreverse bindings) #'leader--binding-sort-predicate)))
+
+
+(defun leader--process-binding (desc rest def target seen callback)
+  "Validate and format a binding before adding it to the results.
+DESC is the full key string, REST is the part after the prefix,
+and DEF is the command or keymap it points to."
+  (when (and (string-prefix-p target desc)
+             (not (eq def 'undefined))
+             ;; Exclude entries that have additional modifiers (e.g., exclude M-C-a if target is M-)
+             (not (string-match-p "[ACHMSs]-" rest))
+             ;; Filter out noisy events (mouse, scroll, etc.)
+             ;; (not (string-match-p leader--ignored-key-regexp rest))
+             ;; Ensure we don't list the same key twice if found in multiple maps
+             (not (gethash desc seen)))
+    (puthash desc t seen)
+    (funcall callback
+             (cons desc (cond ((keymapp def) "prefix")
+                              ((symbolp def) (symbol-name def))
+                              (t (format "%s" def)))))))
 
 (defun leader--clear-which-key ()
   "Clear any visible which-key popup, for all popup types."
   (when (fboundp 'which-key--hide-popup)
     (which-key--hide-popup))
-  ;; Kill the buffer to force fresh creation, preventing stale content
-  ;; from a previous popup from bleeding through.
   (when (and (boundp 'which-key--buffer)
              (buffer-live-p which-key--buffer))
     (let ((buf which-key--buffer))
@@ -392,25 +457,31 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
 
 (defun leader--modifier-which-key-read (target modifier)
   "Show which-key popup filtered by TARGET modifier prefix.
+Collects bindings manually from active maps, avoiding which-key's
+internal filter which may misbehave with modifier prefix matching.
 Read a character with C-h n/p paging support.
 Returns the character read."
   (let ((which-key-inhibit t)
-        (paging-key (kbd which-key-paging-key))
+        (paging-key (when which-key-paging-key
+                      (kbd which-key-paging-key)))
         char)
-    ;; Clear any previous which-key popup before showing ours
+    ;; Clear any previous which-key popup
     (leader--clear-which-key)
-    ;; Show filtered popup via which-key's own buffer-and-show pipeline
-    (when (fboundp 'which-key--create-buffer-and-show)
-      (let ((which-key--automatic-display t)
-            (filter (leader--modifier-filter target)))
-        (which-key--create-buffer-and-show nil nil filter target)))
-    (when (and which-key--pages-obj
-               (> (which-key--pages-num-pages which-key--pages-obj) 1))
-      (message "%s" (leader--which-key-page-hint)))
+    ;; Collect bindings and show popup
+    (when (fboundp 'which-key--create-pages)
+      (let* ((which-key--automatic-display t)
+             (raw (leader--collect-modifier-bindings target)))
+        (when raw
+          (let ((formatted (which-key--format-and-replace raw)))
+            (when formatted
+              (setq which-key--pages-obj
+                    (which-key--create-pages formatted nil target))
+              (which-key--show-page)
+              (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
+                (message "%s" (leader--which-key-page-hint))))))))
     ;; Read loop with C-h n/p paging
     (while (not char)
       (setq char (read-event (leader--prompt target modifier)))
-      ;; C-h: enter paging sub-read
       (if (and which-key-use-C-h-commands
                (numberp char) (= char help-char))
           (when (and which-key--pages-obj
@@ -420,13 +491,10 @@ Returns the character read."
                     ((eq ch ?p) (leader--which-key-next-page -1))))
             (message "%s" (leader--which-key-page-hint))
             (setq char nil))
-        ;; Paging key (<f5>): next page (cycle)
-        (when (and which-key-paging-key
-                   (equal (vector char) paging-key))
+        (when (and paging-key (equal (vector char) paging-key))
           (leader--which-key-next-page 1)
           (message "%s" (leader--which-key-page-hint))
           (setq char nil))))
-    ;; Hide popup after key read
     (when (fboundp 'which-key--hide-popup)
       (which-key--hide-popup))
     char))
