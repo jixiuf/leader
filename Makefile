@@ -13,7 +13,7 @@ byte-compile: $(ELC)
 		--eval "(package-initialize)" \
 		-f batch-byte-compile $<
 test:
-	emacs --batch -Q -L . -L test \
+	emacs --batch -Q --eval "(package-initialize)" -L . -L test \
 	  -l ert \
 	  -l test/leader-test.el \
 	  -f leader-test-run

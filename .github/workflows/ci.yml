@@ -36,3 +36,6 @@ jobs:
 
       - name: Package lint
         run: make package-lint
+
+      - name: Test
+        run: make test

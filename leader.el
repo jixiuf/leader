@@ -4,7 +4,7 @@
 ;; Keywords: convenience
 ;; Version: 0.1
 ;; URL: https://github.com/jixiuf/leader
-;; Package-Requires: ((emacs "30.1"))
+;; Package-Requires: ((emacs "28.1") (which-key "1.0"))
 
 ;; Copyright (C) 2026, jixiuf, all rights reserved.
 
@@ -290,6 +290,19 @@ Each element is either:
   :group 'leader
   :type '(repeat (choice function symbol)))
 
+(defvar leader--event-reader #'read-event
+  "Function to read an event, called with a prompt string.
+Override for testing.  Default is `read-event'.")
+
+(defvar leader--which-key-reader #'leader--modifier-which-key-read
+  "Function to read a key with which-key popup, called with TARGET and MODIFIER.
+Override for testing.")
+
+(defvar leader--key-lookup-fn nil
+  "If non-nil, a function (KEY-STRING) used instead of `key-binding'/`kbd'.
+When nil, uses the real Emacs key binding lookup.
+Set this for testing to provide mock bindings.")
+
 (defvar leader--active-keys nil
   "List of leader key strings currently registered in `key-translation-map'.")
 
@@ -331,6 +344,13 @@ is the fallback modifier for the dispatched context.  The symbol
 
 ;;; Key building helpers
 
+(defun leader--lookup-key (keystr)
+  "Look up KEYSTR in active keymaps.
+Uses `leader--key-lookup-fn' if set, otherwise `key-binding'/`kbd'."
+  (if leader--key-lookup-fn
+      (funcall leader--key-lookup-fn keystr)
+    (key-binding (kbd keystr))))
+
 (defun leader--apply-modifier (base modifier fb-context char)
   "Build key string: try MODIFIER+CHAR → plain CHAR → FALLBACK+CHAR.
 BASE is the accumulated key sequence prefix.
@@ -338,10 +358,10 @@ Returns the resulting key string."
   (let* ((desc (single-key-description char))
          (mod-key (when modifier (concat base " " modifier desc)))
          (plain-key (concat base " " desc)))
-    (cond (modifier (if (and mod-key (key-binding (kbd mod-key))) mod-key plain-key))
-          ((key-binding (kbd plain-key)) plain-key)
+    (cond (modifier (if (and mod-key (leader--lookup-key mod-key)) mod-key plain-key))
+          ((leader--lookup-key plain-key) plain-key)
           (t (let ((fb-key (when fb-context (concat base " " fb-context desc))))
-               (if (and fb-key (key-binding (kbd fb-key))) fb-key plain-key))))))
+               (if (and fb-key (leader--lookup-key fb-key)) fb-key plain-key))))))
 
 
 ;;; which-key integration for modifier prefix dispatches
@@ -545,7 +565,9 @@ VKEYS is the raw key vector, DEFAULT-PREFIX is the fallback prefix,
 MODIFIER-DEFAULT is the default modifier string, DISPATCH-ALIST
 maps characters to dispatch targets, FALLBACK-MODIFIER is the
 fallback modifier, and TOGGLE-TARGET is the toggle modifier.
-Returns a vector of translated keys."
+
+Uses `leader--event-reader' for reading events and
+`leader--key-lookup-fn' for key lookups when set."
   (let* ((len (length vkeys))
          (leader (aref vkeys (1- len))))
     (cond
@@ -559,7 +581,7 @@ Returns a vector of translated keys."
              (need-read t)
              char raw-val parsed target mod-override fb-override binding char2)
         (while need-read
-          (setq char (read-event (leader--prompt keys modifier)))
+          (setq char (funcall leader--event-reader (leader--prompt keys modifier)))
           (setq raw-val (alist-get char dispatch-alist))
           (setq parsed (leader--parse-dispatch raw-val))
           (setq target (car parsed))
@@ -570,7 +592,7 @@ Returns a vector of translated keys."
            ;; otherwise toggle modifier and read next char
            ((and target (string= target "C-"))
             (let ((char-key (concat keys " " (single-key-description char))))
-              (if (commandp (key-binding (kbd char-key)) t)
+              (if (commandp (leader--lookup-key char-key) t)
                   (progn (setq keys char-key)
                          (setq need-read nil))
                 (setq modifier toggle-target))))
@@ -585,7 +607,7 @@ Returns a vector of translated keys."
                                prefix
                              (concat keys " " prefix)))))
             ;; Read second key with which-key popup (paging supported)
-            (setq char2 (leader--modifier-which-key-read target modifier))
+            (setq char2 (funcall leader--which-key-reader target modifier))
             (setq keys (concat target (single-key-description char2)))
             (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
             (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
@@ -601,7 +623,7 @@ Returns a vector of translated keys."
            ;; No dispatch match: if leader char pressed, implicit toggle
            ((and (null target) (eq char leader))
             (let ((char-key (concat keys " " (single-key-description char))))
-              (if (commandp (key-binding (kbd char-key)) t)
+              (if (commandp (leader--lookup-key char-key) t)
                   (progn (setq keys char-key)
                          (setq need-read nil))
                 (setq modifier toggle-target))))
@@ -612,16 +634,16 @@ Returns a vector of translated keys."
             (setq fb-context fallback-modifier)
             (setq need-read nil))))
         ;; Continue reading while binding is a prefix key (keymap)
-        (setq binding (key-binding (kbd keys)))
+        (setq binding (leader--lookup-key keys))
         (while (not (or (commandp binding t) (null binding)))
           (setq need-read t)
           (while need-read
-            (setq char (read-event (leader--prompt keys modifier)))
+            (setq char (funcall leader--event-reader (leader--prompt keys modifier)))
             (cond
              ;; Leader char pressed again: implicit toggle
              ((eq char leader)
               (let ((char-key (concat keys " " (single-key-description char))))
-                (if (commandp (key-binding (kbd char-key)) t)
+                (if (commandp (leader--lookup-key char-key) t)
                     (progn (setq keys char-key)
                            (setq need-read nil))
                   (setq modifier toggle-target))))
@@ -631,7 +653,7 @@ Returns a vector of translated keys."
               (setq modifier modifier-default)
               (setq fb-context fallback-modifier)
               (setq need-read nil))))
-          (setq binding (key-binding (kbd keys))))
+          (setq binding (leader--lookup-key keys)))
         (kbd keys)))
      (t
       (vector leader)))))
