@@ -281,11 +281,12 @@ implicit leader toggle — they never consult the dispatch alist."
                                                     (string :tag "Fallback modifier")))))))))
 
 (defcustom leader-pass-through-predicates '(minibufferp isearch-mode)
-  "List of predicates controlling when the leader key passes through.
+  "Predicates controlling when the leader key passes through.
 By default, pass through in minibuffer and isearch.
 Each element is either:
-- A function (or lambda): called with no arguments, pass through if non-nil.
-- A symbol: if bound as a variable, use its value; if bound as a function, call it."
+- A function (or lambda): called with no arguments.
+- A symbol: if bound as a variable, use its value;
+  if bound as a function, call it."
   :group 'leader
   :type '(repeat (choice function symbol)))
 

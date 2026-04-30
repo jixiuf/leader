@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs-version: [28.2, 29.4, 30.1,snapshot]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emacs
+        uses: jcs090218/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs-version }}
+
+      - name: Install dependencies
+        run: |
+          emacs --batch -Q \
+            --eval "(package-initialize)" \
+            --eval "(unless (require 'package-lint nil t) (package-refresh-contents) (package-install 'package-lint))" \
+            --eval "(when (< emacs-major-version 30) (unless (require 'which-key nil t) (package-install 'which-key)))"
+
+      - name: Byte compile
+        run: make byte-compile
+
+      - name: Checkdoc
+        run: make checkdoc
+
+      - name: Package lint
+        run: make package-lint

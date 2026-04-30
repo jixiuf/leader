@@ -9,7 +9,9 @@ all: byte-compile lint test
 byte-compile: $(ELC)
 
 %.elc: %.el
-	$(EMACS) --batch  -Q --eval "(setq byte-compile-error-on-warn t)" -f batch-byte-compile $<
+	$(EMACS) --batch -Q --eval "(setq byte-compile-error-on-warn t)" \
+		--eval "(package-initialize)" \
+		-f batch-byte-compile $<
 test:
 	emacs --batch -Q -L . -L test \
 	  -l ert \
