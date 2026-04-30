@@ -1,9 +1,10 @@
 ;;; leader.el --- Leader key configuration -*- lexical-binding: t; -*-
 
 ;; Author: jixiuf
-;; Keywords: leader
+;; Keywords: convenience
+;; Version: 0.1
 ;; URL: https://github.com/jixiuf/leader
-;; Package-Requires: ((emacs "28.1"))
+;; Package-Requires: ((emacs "30.1"))
 
 ;; Copyright (C) 2026, jixiuf, all rights reserved.
 
@@ -212,6 +213,7 @@
 ;;   (leader-mode 1)
 
 (require 'seq)
+(require 'which-key)
 
 ;;; Code:
 
@@ -228,35 +230,35 @@
      (?x . ("C-x" "C-" nil))))           ;spc x f=C-x C-f (C- only, no plain fallback)
   "List of leader key configurations.
 Each element is a list (LEADER-KEY DEFAULT-PREFIX . DISPATCH-ALIST).
-LEADER-KEY is a key description string for `keymap-set'.
+LEADER-KEY is a key description string (kbd format).
 DEFAULT-PREFIX specifies the prefix and default modifier behaviour.
   It can be either:
-  - A string \"C-c\": modifier defaults to \"C-\" (auto-add C- to keys),
-    and fallback-modifier also defaults to \"C-\".
-  - A list (\"C-c\" MODIFIER): modifier defaults to MODIFIER.
-  - A list (\"C-c\" MODIFIER FALLBACK): FALLBACK is the modifier
+  - A string `C-c': modifier defaults to `C-' (auto-add C- to keys),
+    and fallback-modifier also defaults to `C-'.
+  - A list (`C-c' MODIFIER): modifier defaults to MODIFIER.
+  - A list (`C-c' MODIFIER FALLBACK): FALLBACK is the modifier
     used when MODIFIER is nil and the plain key has no binding
     (defaults to MODIFIER).
 DISPATCH-ALIST is an alist mapping characters to dispatch targets.
 
 Each dispatch target can be either:
-- A string: e.g. \"C-x\", \"M-\", \"C-\"
+- A string: e.g. `C-x', `M-', `C-'
   After dispatching, modifier and fb-context reset to defaults.
-- A list (\"C-x\" MODIFIER): e.g. (\"C-x\" \"C-\"), (\"C-h\" nil)
+- A list (`C-x' MODIFIER): e.g. (`C-x' `C-'), (`C-h' nil)
   After dispatching, modifier is set to the specified MODIFIER.
-- A list (\"C-x\" MODIFIER FALLBACK): e.g. (\"C-x\" \"C-\" nil)
+- A list (`C-x' MODIFIER FALLBACK): e.g. (`C-x' `C-' nil)
   After dispatching, modifier=FALLBACK-MODIFIER for the dispatched context.
   FALLBACK defaults to the global `fallback-modifier' if omitted.
 
-If a dispatch value (or its car) ends with \"-\" (e.g. \"M-\"),
+If a dispatch value (or its car) ends with `-' (e.g. `M-'),
 a second key is read and combined with the modifier prefix.
 
-The special target \"C-\" toggles the modifier state.
+The special target `C-' toggles the modifier state.
 When the leader key itself is not in the dispatch alist, pressing
 it also acts as an implicit toggle.
 
 NOTE: Dispatch entries only apply as immediate followers of the
-leader key.  Once a prefix keymap is entered (e.g. C-c f is a
+leader key.  Once a prefix keymap is entered (e.g. `C-c f' is a
 prefix), subsequent keys use only modifier/fallback logic and the
 implicit leader toggle — they never consult the dispatch alist."
   :group 'leader
@@ -294,7 +296,7 @@ Each element is either:
 
 (defun leader--pass-through-p ()
   "Return non-nil if the leader key should pass through as a normal key.
-Checks for active minibuffer, isearch-mode, and custom predicates."
+Checks for active minibuffer, `isearch-mode', and custom predicates."
   (or (active-minibuffer-window)
       (bound-and-true-p isearch-mode)
       (seq-some
@@ -306,11 +308,6 @@ Checks for active minibuffer, isearch-mode, and custom predicates."
           (t nil)))
        leader-pass-through-predicates)))
 
-;; Declare as special (dynamic) variable so `let' binding works with which-key.
-;; Do NOT override if which-key already defined it.
-(defvar which-key-this-command-keys-function #'this-command-keys
-  "Dynamic variable used by which-key to get current key sequence.")
-
 (defun leader--prompt (keys modifier)
   "Build prompt string showing KEYS and current MODIFIER state."
   (if modifier
@@ -320,9 +317,9 @@ Checks for active minibuffer, isearch-mode, and custom predicates."
 (defun leader--parse-dispatch (val)
   "Parse a dispatch VAL into a list (TARGET MOD-OVERRIDE FB-OVERRIDE).
 VAL can be:
-- A string like \"C-x\":       returns (\"C-x\" default default)
-- A list (\"C-x\" MOD):       returns (\"C-x\" MOD default)
-- A list (\"C-x\" MOD FB):    returns (\"C-x\" MOD FB)
+- A string like `C-x':       returns (`C-x' default default)
+- A list (`C-x' MOD):       returns (`C-x' MOD default)
+- A list (`C-x' MOD FB):    returns (`C-x' MOD FB)
 MOD-OVERRIDE is the modifier to set after dispatch.  FB-OVERRIDE
 is the fallback modifier for the dispatched context.  The symbol
 `default' means use the global default value."
@@ -337,6 +334,7 @@ is the fallback modifier for the dispatched context.  The symbol
 
 (defun leader--apply-modifier (base modifier fb-context char)
   "Build key string: try MODIFIER+CHAR → plain CHAR → FALLBACK+CHAR.
+BASE is the accumulated key sequence prefix.
 Returns the resulting key string."
   (let* ((desc (single-key-description char))
          (mod-key (when modifier (concat base " " modifier desc)))
@@ -350,7 +348,8 @@ Returns the resulting key string."
 ;;; which-key integration for modifier prefix dispatches
 
 (defun leader--collect-esc-bindings (keymap target seen)
-  "Collect ESC-prefix bindings from KEYMAP that match TARGET."
+  "Collect `ESC-prefix' bindings from KEYMAP that match TARGET.
+SEEN is a hash table tracking already-collected bindings."
   (let ((result nil))
     (map-keymap
      (lambda (sub-ev sub-def)
@@ -376,6 +375,7 @@ Returns the resulting key string."
 
 (defun leader--binding-sort-predicate (a b)
   "Sort predicate for modifier bindings.
+A and B are cons cells (KEY-NAME . DESCRIPTION).
 Keys with angle brackets sort after plain keys; within each
 group shorter names sort first, then alphabetically."
   (let* ((ka (car a)) (kb (car b))
@@ -412,7 +412,9 @@ group shorter names sort first, then alphabetically."
 (defun leader--process-binding (desc rest def target seen callback)
   "Validate and format a binding before adding it to the results.
 DESC is the full key string, REST is the part after the prefix,
-and DEF is the command or keymap it points to."
+DEF is the command or keymap it points to, TARGET is the modifier
+prefix being matched, SEEN tracks already-collected keys, and
+CALLBACK is the function to call with each valid binding."
   (when (and (string-prefix-p target desc)
              (not (eq def 'undefined))
              ;; Exclude entries that have additional modifiers (e.g., exclude M-C-a if target is M-)
@@ -429,10 +431,8 @@ and DEF is the command or keymap it points to."
 
 (defun leader--clear-which-key ()
   "Clear any visible which-key popup, for all popup types."
-  (when (fboundp 'which-key--hide-popup)
-    (which-key--hide-popup))
-  (when (and (boundp 'which-key--buffer)
-             (buffer-live-p which-key--buffer))
+  (which-key--hide-popup)
+  (when (buffer-live-p which-key--buffer)
     (let ((buf which-key--buffer))
       (setq which-key--buffer nil)
       (kill-buffer buf)))
@@ -457,28 +457,28 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
 
 (defun leader--modifier-which-key-read (target modifier)
   "Show which-key popup filtered by TARGET modifier prefix.
+MODIFIER is the current modifier state (e.g. \"C-\" or nil).
 Collects bindings manually from active maps, avoiding which-key's
 internal filter which may misbehave with modifier prefix matching.
-Read a character with C-h n/p paging support.
+Read a character with \\`C-h' n/p paging support.
 Returns the character read."
   (let ((which-key-inhibit t)
-        (paging-key (when which-key-paging-key
-                      (kbd which-key-paging-key)))
+        (paging-key (and which-key-paging-key
+                         (kbd which-key-paging-key)))
         char)
     ;; Clear any previous which-key popup
     (leader--clear-which-key)
     ;; Collect bindings and show popup
-    (when (fboundp 'which-key--create-pages)
-      (let* ((which-key--automatic-display t)
-             (raw (leader--collect-modifier-bindings target)))
-        (when raw
-          (let ((formatted (which-key--format-and-replace raw)))
-            (when formatted
-              (setq which-key--pages-obj
-                    (which-key--create-pages formatted nil target))
-              (which-key--show-page)
-              (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
-                (message "%s" (leader--which-key-page-hint))))))))
+    (let* ((which-key--automatic-display t)
+           (raw (leader--collect-modifier-bindings target)))
+      (when raw
+        (let ((formatted (which-key--format-and-replace raw)))
+          (when formatted
+            (setq which-key--pages-obj
+                  (which-key--create-pages formatted nil target))
+            (which-key--show-page)
+            (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
+              (message "%s" (leader--which-key-page-hint)))))))
     ;; Read loop with C-h n/p paging
     (while (not char)
       (setq char (read-event (leader--prompt target modifier)))
@@ -495,22 +495,21 @@ Returns the character read."
           (leader--which-key-next-page 1)
           (message "%s" (leader--which-key-page-hint))
           (setq char nil))))
-    (when (fboundp 'which-key--hide-popup)
-      (which-key--hide-popup))
+    (which-key--hide-popup)
     char))
 
 
 ;;; Handler
 
 (defun leader--make-handler (default-prefix modifier-default dispatch-alist fallback-modifier)
-  "Return a key-translation-map handler for a leader key.
+  "Return a `key-translation-map' handler for a leader key.
 DEFAULT-PREFIX is the fallback prefix string.
-MODIFIER-DEFAULT is the default modifier string (e.g. \"C-\", \"M-\")
+MODIFIER-DEFAULT is the default modifier string (e.g. `C-', `M-')
 or nil for no modifier.  It controls how subsequent ordinary keys
 are wrapped.
 DISPATCH-ALIST maps characters to dispatch targets.
 FALLBACK-MODIFIER is used when MODIFIER is nil and the plain key
-has no binding (e.g. \"C-\").
+has no binding (e.g. `C-').
 
 When MODIFIER is non-nil, keys are tried as MODIFIER+char first,
 falling back to plain char if no binding exists.
@@ -518,8 +517,8 @@ When MODIFIER is nil, keys are tried as plain char first,
 falling back to FALLBACK-MODIFIER+char if set.
 
 The leader key itself (when not in DISPATCH-ALIST) and any dispatch
-entry with target \"C-\" act as toggles: they switch MODIFIER between
-MODIFIER-DEFAULT and nil (or \"C-\" if MODIFIER-DEFAULT is also nil).
+entry with target `C-' act as toggles: they switch MODIFIER between
+MODIFIER-DEFAULT and nil (or `C-' if MODIFIER-DEFAULT is also nil).
 
 Dispatch entries only apply as immediate followers of the leader key.
 When following a prefix keymap (e.g. the handler continues reading
@@ -527,10 +526,10 @@ keys after a prefix binding), only modifier/fallback logic and the
 implicit leader toggle are used — the dispatch alist is not consulted.
 
 Each dispatch entry value can be:
-- A string: e.g. \"C-x\", \"M-\", \"C-\"
-- A list (STRING MODIFIER): e.g. (\"C-x\" \"C-\") sets modifier to \"C-\"
-  after switching to the C-x prefix.
-- A list (STRING MODIFIER FALLBACK): e.g. (\"C-x\" \"C-\" nil) also
+- A string: e.g. `C-x', `M-', `C-'
+- A list (STRING MODIFIER): e.g. (`C-x' `C-') sets modifier to `C-'
+  after switching to the `C-x' prefix.
+- A list (STRING MODIFIER FALLBACK): e.g. (`C-x' `C-' nil) also
   overrides the fallback modifier for the dispatched context.
   FALLBACK defaults to the global `fallback-modifier' if omitted."
   (let ((toggle-target (if modifier-default nil "C-")))
@@ -542,7 +541,11 @@ Each dispatch entry value can be:
 
 (defun leader--run-handler (vkeys default-prefix modifier-default dispatch-alist
                             fallback-modifier toggle-target)
-  "Process a single key-translation-map event.
+  "Process a single `key-translation-map' event.
+VKEYS is the raw key vector, DEFAULT-PREFIX is the fallback prefix,
+MODIFIER-DEFAULT is the default modifier string, DISPATCH-ALIST
+maps characters to dispatch targets, FALLBACK-MODIFIER is the
+fallback modifier, and TOGGLE-TARGET is the toggle modifier.
 Returns a vector of translated keys."
   (let* ((len (length vkeys))
          (leader (aref vkeys (1- len))))
@@ -651,13 +654,13 @@ Returns a vector of translated keys."
            (dispatch-alist (cddr entry))
            (handler (leader--make-handler default-prefix modifier-default
                                           dispatch-alist fallback-modifier)))
-      (keymap-set key-translation-map leader-key handler)
+       (define-key key-translation-map (kbd leader-key) handler)
       (push leader-key leader--active-keys))))
 
 (defun leader--uninstall ()
   "Remove all leader key handlers from `key-translation-map'."
   (dolist (key leader--active-keys)
-    (keymap-set key-translation-map key nil))
+    (define-key key-translation-map (kbd key) nil))
   (setq leader--active-keys nil))
 
 ;;;###autoload
