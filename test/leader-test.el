@@ -701,7 +701,308 @@ If so, it uses it directly without toggling."
       (should (equal result (kbd "C-c f"))))))
 
 
-;;; leader--parse-prefix-spec
+;;; Dispatch in continuation (prefix keymap)
+
+(ert-deftest leader-test-continuation-direct-dispatch ()
+  "Dispatch entries work inside continuation prefix maps."
+  (let ((prefix-map (make-sparse-keymap))
+        (dispatch-prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x C-b" . ,dispatch-prefix-map)
+          ("C-c x C-b C-f" . next-line))
+        '(?x ?b ?f)
+      ;; SPC x → C-c x (prefix), b → dispatch "C-b" (direct, goes to C-c x C-b prefix)
+      ;; C-c x C-b is a prefix → continue, f → C-f → done
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?b '("C-b" "C-")))
+                     "C-" "C-")))
+        (should (equal result (kbd "C-c x C-b C-f")))))))
+
+(ert-deftest leader-test-continuation-direct-dispatch-no-prefer ()
+  "Continuation direct dispatch with prefer-command=nil."
+  (let ((prefix-map (make-sparse-keymap))
+        (dispatch-prefix-map (make-sparse-keymap))
+        (leader-prefer-command-over-dispatch nil))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x C-b" . ,dispatch-prefix-map)
+          ("C-c x C-b C-f" . next-line))
+        '(?x ?b ?f)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?b '("C-b" "C-")))
+                     "C-" "C-")))
+        (should (equal result (kbd "C-c x C-b C-f")))))))
+
+(ert-deftest leader-test-continuation-modifier-prefix-dispatch ()
+  "Continuation modifier prefix dispatch with which-key."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x M-f" . next-line))
+        '(?x ?g ?f)
+      (let ((leader--which-key-reader (leader-test--which-key-reader ?f))
+            (leader-prefer-command-over-dispatch nil))
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?g "M-"))
+                       "C-" "C-")))
+          (should (equal result (kbd "C-c x M-f"))))))))
+
+(ert-deftest leader-test-continuation-dispatch-with-toggle ()
+  "C- toggle dispatch works in continuation."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x C-a" . next-line)
+          ("C-c x b" . previous-line))
+        '(?x ?t ?a)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?t "C-"))
+                     "C-" "C-")))
+        ;; x → C-c x (prefix), t → C- dispatch, "C-c x t" not a command → toggle
+        ;; modifier becomes "C-", a → "C-c x C-a" (bound) → done
+        (should (equal result (kbd "C-c x C-a")))))))
+
+(ert-deftest leader-test-continuation-dispatch-toggle-as-command ()
+  "C- toggle in continuation: command check with prefer-command=t."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x t" . next-line))
+        '(?x ?t)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?t "C-"))
+                     "C-" "C-")))
+        ;; x → C-c x (prefix), t matches C- dispatch
+        ;; "C-c x t" IS a command → use it directly
+        (should (equal result (kbd "C-c x t")))))))
+
+
+;;; leader-prefer-command-over-dispatch
+
+(ert-deftest leader-test-prefer-command-modifier-prefix ()
+  "Prefer-command=t: command overrides modifier prefix dispatch."
+  (leader-test--with-handler-env
+      '(("C-c e" . next-line))
+      '(?e)
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   (list (cons ?e "C-M-"))  ; e dispatches to C-M-
+                   "C-" "C-")))
+      ;; e matches dispatch "C-M-", prefer-command:
+      ;; apply-modifier "C-c" nil "C-" ?e → "C-c e" → IS command → use it
+      (should (equal result (kbd "C-c e"))))))
+
+(ert-deftest leader-test-prefer-command-wins-over-direct-dispatch ()
+  "Prefer-command=t: bound command takes priority over direct dispatch."
+  (leader-test--with-handler-env
+      '(("C-c f" . next-line))
+      '(?f)
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   (list (cons ?f "C-x"))  ; f dispatches to C-x
+                   "C-" "C-")))
+      ;; f matches dispatch "C-x", prefer-command checks:
+      ;; apply-modifier "C-c" nil "C-" ?f → "C-c f" (plain, no C-f binding)
+      ;; "C-c f" IS a command → use it
+      (should (equal result (kbd "C-c f"))))))
+
+(ert-deftest leader-test-prefer-command-wins-over-modifier-prefix-dispatch ()
+  "Prefer-command=t: bound command overrides modifier prefix dispatch."
+  (leader-test--with-handler-env
+      '(("C-c f" . next-line))
+      '(?f)
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   (list (cons ?f "M-"))  ; f dispatches to M-
+                   "C-" "C-")))
+      ;; f matches dispatch "M-", prefer-command:
+      ;; apply-modifier "C-c" nil "C-" ?f → "C-c f" → IS a command → use it
+      (should (equal result (kbd "C-c f"))))))
+
+(ert-deftest leader-test-prefer-dispatch-nil-direct-match ()
+  "prefer-command=nil: dispatch takes priority always."
+  (let ((leader-prefer-command-over-dispatch nil))
+    (let ((prefix-map (make-sparse-keymap)))
+      (leader-test--with-handler-env
+          `(("C-c f" . next-line)
+            ("C-x" . ,prefix-map)
+            ("C-x C-f" . find-file))
+          '(?f ?g)
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?f "C-x"))
+                       "C-" "C-")))
+          ;; f matches dispatch "C-x" → dispatch applies (prefer-command=nil)
+          ;; keys="C-x", modifier=nil, fb="C-"
+          ;; C-x is a prefix → continue, next key g (NOT in dispatch)
+          ;; modifier nil + fallback C-: tries C-x g (unbound) → C-x C-g
+          ;; Both unbound → returns plain "C-x g"
+          (should (equal result (kbd "C-x g"))))))))
+
+(ert-deftest leader-test-prefer-dispatch-nil-modifier-prefix ()
+  "prefer-command=nil: modifier prefix dispatch takes priority."
+  (let ((leader-prefer-command-over-dispatch nil))
+    (leader-test--with-handler-env
+        '(("C-c f" . next-line))
+        '(?f ?g)
+      (let ((leader--which-key-reader (leader-test--which-key-reader ?g)))
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?f "M-"))
+                       "C-" "C-")))
+          ;; f matches dispatch "M-" → dispatch applies (prefer-command=nil)
+          ;; reads second key g → "M-g"
+          (should (equal result (kbd "M-g"))))))))
+
+(ert-deftest leader-test-prefer-dispatch-nil-c-toggle ()
+  "prefer-command=nil: C- toggle skips command check."
+  (let ((leader-prefer-command-over-dispatch nil))
+    (leader-test--with-handler-env
+        '(("C-c t" . next-line)
+          ("C-c C-a" . find-file))
+        '(?t ?a)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?t "C-"))
+                     "C-" "C-")))
+        ;; t matches C- dispatch, prefer-command=nil → skip command check
+        ;; toggle modifier to C-, a → "C-c C-a" (bound)
+        (should (equal result (kbd "C-c C-a")))))))
+
+(ert-deftest leader-test-prefer-command-t-c-toggle ()
+  "prefer-command=t: C- toggle checks command first."
+  (leader-test--with-handler-env
+      '(("C-c t" . next-line))
+      '(?t)
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   (list (cons ?t "C-"))
+                   "C-" "C-")))
+      ;; t matches C- dispatch, prefer-command=t → check "C-c t"
+      ;; "C-c t" IS a command → use it
+      (should (equal result (kbd "C-c t"))))))
+
+(ert-deftest leader-test-prefer-command-implicit-toggle ()
+  "prefer-command=t: implicit toggle checks command first."
+  (leader-test--with-handler-env
+      '(("C-c SPC" . next-line))
+      '(?  )
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   nil
+                   "C-" "C-")))
+      ;; leader=SPC, char=SPC, implicit toggle
+      ;; prefer-command=t → check "C-c SPC" → IS a command → use it
+      (should (equal result (kbd "C-c SPC"))))))
+
+(ert-deftest leader-test-prefer-dispatch-nil-implicit-toggle ()
+  "prefer-command=nil: implicit toggle skips command check."
+  (let ((leader-prefer-command-over-dispatch nil))
+    (leader-test--with-handler-env
+        '(("C-c SPC" . next-line)
+          ("C-c C-f" . find-file))
+        '(?  ?f)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     nil
+                     "C-" "C-")))
+        ;; leader=SPC, char=SPC, implicit toggle
+        ;; prefer-command=nil → skip command check → toggle modifier to C-
+        ;; f → "C-c C-f" (bound)
+        (should (equal result (kbd "C-c C-f")))))))
+
+(ert-deftest leader-test-prefer-command-continuation ()
+  "Prefer-command=t inside continuation: command overrides dispatch."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x f" . next-line))
+        '(?x ?f)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?f "C-x"))  ; f dispatches to C-x
+                     "C-" "C-")))
+        ;; x → "C-c x" (prefix, enter continuation)
+        ;; f matches dispatch "C-x", but "C-c x f" IS a command → use it
+        (should (equal result (kbd "C-c x f")))))))
+
+(ert-deftest leader-test-prefer-command-no-match-still-dispatches ()
+  "Prefer-command=t but no command bound → dispatch still applies."
+  (leader-test--with-handler-env
+      '(("C-c C-a" . next-line))
+      '(?f ?a)
+    (let ((leader--which-key-reader (leader-test--which-key-reader ?a)))
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?f "C-M-"))  ; f dispatches to C-M-
+                     "C-" "C-")))
+        ;; f matches dispatch "C-M-", prefer-command:
+        ;; apply-modifier "C-c" nil "C-" ?f → "C-c f" → NOT a command
+        ;; → dispatch applies → modifier=C-M-, read next key a
+        ;; → keys = "C-M-a" (prefix replaced at first level)
+        (should (equal result (kbd "C-M-a")))))))
+
+(ert-deftest leader-test-prefer-command-c-toggle-still-dispatches-no-cmd ()
+  "Prefer-command=t but C- toggle key is not a command → toggle applies."
+  (leader-test--with-handler-env
+      '(("C-c C-a" . next-line))
+      '(?t ?a)
+    (let ((result (leader--run-handler
+                   [? ]
+                   "C-c" nil
+                   (list (cons ?t "C-"))
+                   "C-" "C-")))
+      ;; t matches C- dispatch, prefer-command → check "C-c t"
+      ;; "C-c t" NOT a command → toggle modifier to C-, a → "C-c C-a"
+      (should (equal result (kbd "C-c C-a"))))))
+
+(ert-deftest leader-test-complex-chain-with-dispatch ()
+  "Multi-level chain with interleaved dispatches."
+  (let ((prefix-map-0 (make-sparse-keymap))
+        (prefix-map-1 (make-sparse-keymap))
+        (prefix-map-2 (make-sparse-keymap)))
+    (define-key prefix-map-2 "f" 'next-line)
+    (leader-test--with-handler-env
+        `(("C-a" . ,prefix-map-0)
+          ("C-a x" . ,prefix-map-1)
+          ("C-a x C-b" . ,prefix-map-2)
+          ("C-a x C-b C-f" . next-line))
+        '(?g ?x ?b ?f)
+      (let ((leader-prefer-command-over-dispatch nil))
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?g "C-a")
+                             (cons ?b '("C-b" "C-")))
+                       "C-" "C-")))
+          ;; g → dispatch to "C-a" (prefix)
+          ;; x → "C-a x" (prefix, modifier logic)
+          ;; b → dispatch to "C-b" (direct, prefer-command=nil)
+          ;;   → "C-a x C-b" (prefix, enter next continuation)
+          ;; f → modifier logic (C- modifier) → "C-a x C-b C-f" (command)
+          (should (equal result (kbd "C-a x C-b C-f"))))))))
 
 (ert-deftest leader-test-prefix-spec-string ()
   "String prefix spec: modifier-default='C-', fallback='C-'."

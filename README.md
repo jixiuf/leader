@@ -66,6 +66,10 @@ defaults to `modifier-default`.
 
 ## Dispatch Entry Types
 
+Dispatch entries apply at **every level**, including inside prefix keymaps
+(after entering a prefix like `C-x`). Use `leader-prefer-command-over-dispatch`
+(non-nil by default) to give bound commands priority over matching dispatch entries.
+
 ### Prefix Switch
 
 ```elisp
@@ -133,6 +137,33 @@ Each element is either:
 (add-to-list 'leader-pass-through-predicates 'my-special-input-mode)
 ```
 
+## Dispatch in Continuation
+
+Dispatch entries apply at **every level**, including inside prefix keymaps.
+After entering a prefix (e.g., `C-x`), subsequent keys still consult the
+dispatch alist.
+
+```elisp
+;; With modifier-default=nil, dispatch has (?b . ("C-b" "C-")):
+;;   SPC a → C-c a (prefix), b → dispatch to C-b (direct, in continuation)
+;;   Then f → C-c a C-b C-f
+```
+
+### `leader-prefer-command-over-dispatch`
+
+When non-nil (default), if a pressed key matches a dispatch entry AND
+also resolves to a bound command via modifier/fallback logic, the command
+takes priority.
+
+```elisp
+(setq leader-prefer-command-over-dispatch t)  ; default: prefer commands
+(setq leader-prefer-command-over-dispatch nil) ; dispatch always wins
+
+;; Example: dispatch has (?e . "C-M-"), and "C-c e" is a bound command
+;; With prefer-command=t:  SPC e → executes C-c e (command wins)
+;; With prefer-command=nil: SPC e → dispatch to C-M-, read next key
+```
+
 ## Full Configuration Example
 
 ```elisp
@@ -167,6 +198,20 @@ Each element is either:
 | SPC SPC f | C-c f | toggle -> modifier=nil |
 | SPC x f | C-x C-f | dispatch x->C-x |
 
+### Dispatch in Continuation (modifier-default=nil, dispatch has (?b . ("C-b" "C-")))
+
+| Keystrokes | Translation | Explanation |
+|------------|-------------|--------------|
+| SPC a b | C-c a C-b | a->prefix "C-c a", b->dispatch "C-b" in continuation |
+| SPC a b f | C-c a C-b C-f | dispatch "C-b" then f with C- modifier |
+
+### Prefer-command (dispatch has (?e . "C-M-"), C-c e is bound)
+
+| Keystrokes | Translation | Explanation |
+|------------|-------------|--------------|
+| SPC e | C-c e | prefer-command=t (default), command wins |
+| SPC e (nil) | dispatches | prefer-command=nil, dispatch to C-M- |
+
 ## Commands
 
 - `leader-mode` - Toggle the leader mode globally
@@ -175,6 +220,7 @@ Each element is either:
 
 - `leader-keys` - List of leader key configurations
 - `leader-pass-through-predicates` - List of predicates for pass-through
+- `leader-prefer-command-over-dispatch` - Prefer bound commands over dispatch entries (default t)
 
 ## Comparison with Other Leader Key Packages
 
@@ -210,6 +256,7 @@ general.el is a key-definition convenience library that can also provide leader-
 - Uses `key-translation-map` for universal interception
 - Smart modifier system with automatic fallback
 - Per-prefix modifier override
+- Dispatch entries apply at every level (in prefix keymaps too)
 - Toggle between different modifier states
 - Simple configuration format
 

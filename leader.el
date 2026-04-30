@@ -4,7 +4,7 @@
 ;; Keywords: convenience
 ;; Version: 0.1
 ;; URL: https://github.com/jixiuf/leader
-;; Package-Requires: ((emacs "28.1") (which-key "1.0"))
+;; Package-Requires: ((emacs "30.1"))
 
 ;; Copyright (C) 2026, jixiuf, all rights reserved.
 
@@ -135,14 +135,28 @@
 ;;
 ;; After the initial dispatch resolves to a key sequence, if that
 ;; sequence is bound to a prefix keymap (not a command), leader
-;; continues reading keys.  The same dispatch rules apply at each
-;; step, and modifier resets to modifier-default after each ordinary key.
+;; continues reading keys.  Dispatch entries apply at every level
+;; (same as the first key), and modifier resets to modifier-default
+;; after each ordinary key.
 ;;
 ;; Example (with modifier-default=nil, fallback-modifier="C-"):
 ;;
 ;;   SPC x is dispatched to C-x (a prefix keymap).
 ;;   Next key f:  modifier=nil -> try C-x f, no binding -> fallback to
 ;;   C-x C-f (via fallback-modifier="C-").  C-x C-f is a command -> done.
+;;
+;; Example (dispatch in continuation):
+;;
+;;   Suppose C-c a is a prefix keymap, and dispatch has (?f . "M-")
+;;   and (?b . ("C-b" "C-")).
+;;
+;;   SPC a          -> C-c a (prefix, enter continuation)
+;;   f              -> dispatch "M-" -> read second key with which-key
+;;   g              -> C-c a M-g -> done (if bound to a command)
+;;
+;;   SPC a          -> C-c a (prefix)
+;;   b              -> dispatch "C-b" (direct match)
+;;   f              -> C-c a C-b C-f -> done
 ;;
 ;; Example (continuation with "C-" toggle):
 ;;
@@ -210,6 +224,23 @@
 ;;                (lambda () (eq helix--current-state 'insert)))
 ;;
 ;;   (leader-mode 1)
+;;
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;; 9.  `leader-prefer-command-over-dispatch'
+;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+;;
+;; When non-nil (default), if a key matches a dispatch entry but also
+;; resolves to a bound command under the current modifier logic, the
+;; command is executed instead of dispatching.
+;;
+;; Example with modifier-default=nil, dispatch (?e . "C-M-"):
+;;
+;;   SPC e          ; e is in dispatch "C-M-", but C-c e is a command
+;;                  ; → C-c e is executed (command wins)
+;;   SPC e          ; e is in dispatch "C-M-", C-c e has no binding
+;;                  ; → modifier set to C-M-, read next key
+;;
+;; When nil, dispatch entries always take priority.
 
 (require 'seq)
 (require 'which-key)
@@ -256,10 +287,10 @@ The special target `C-' toggles the modifier state.
 When the leader key itself is not in the dispatch alist, pressing
 it also acts as an implicit toggle.
 
-NOTE: Dispatch entries only apply as immediate followers of the
-leader key.  Once a prefix keymap is entered (e.g. `C-c f' is a
-prefix), subsequent keys use only modifier/fallback logic and the
-implicit leader toggle — they never consult the dispatch alist."
+NOTE: Dispatch entries apply at every level.  After entering a prefix
+keymap, subsequent keys also consult the dispatch alist.  When
+`leader-prefer-command-over-dispatch' is non-nil (the default), a
+bound command takes priority over a matching dispatch entry."
   :group 'leader
   :type '(repeat
           (list (string :tag "Leader key")
@@ -289,6 +320,16 @@ Each element is either:
   if bound as a function, call it."
   :group 'leader
   :type '(repeat (choice function symbol)))
+
+(defcustom leader-prefer-command-over-dispatch t
+  "Prefer executing a bound command over following a dispatch entry.
+When non-nil, if a pressed key matches a dispatch entry AND the key
+\(with current modifier/fallback logic) resolves to a bound command,
+execute the command instead of dispatching.
+When nil, dispatch entries always take priority over commands.
+Applies at every level, including inside prefix keymaps."
+  :group 'leader
+  :type 'boolean)
 
 (defvar leader--event-reader #'read-event
   "Function to read an event, called with a prompt string.
@@ -539,10 +580,9 @@ The leader key itself (when not in DISPATCH-ALIST) and any dispatch
 entry with target `C-' act as toggles: they switch MODIFIER between
 MODIFIER-DEFAULT and nil (or `C-' if MODIFIER-DEFAULT is also nil).
 
-Dispatch entries only apply as immediate followers of the leader key.
-When following a prefix keymap (e.g. the handler continues reading
-keys after a prefix binding), only modifier/fallback logic and the
-implicit leader toggle are used — the dispatch alist is not consulted.
+Dispatch entries apply at every level, including inside prefix keymaps.
+When `leader-prefer-command-over-dispatch' is non-nil, a bound command
+takes priority over a matching dispatch entry.
 
 Each dispatch entry value can be:
 - A string: e.g. `C-x', `M-', `C-'
@@ -567,7 +607,11 @@ maps characters to dispatch targets, FALLBACK-MODIFIER is the
 fallback modifier, and TOGGLE-TARGET is the toggle modifier.
 
 Uses `leader--event-reader' for reading events and
-`leader--key-lookup-fn' for key lookups when set."
+`leader--key-lookup-fn' for key lookups when set.
+
+Dispatch entries apply at every level when
+`leader-prefer-command-over-dispatch' is nil; when non-nil, a
+bound command takes priority over a matching dispatch entry."
   (let* ((len (length vkeys))
          (leader (aref vkeys (1- len))))
     (cond
@@ -579,6 +623,7 @@ Uses `leader--event-reader' for reading events and
              (keys default-prefix)
              (which-key-this-command-keys-function (lambda () (kbd keys)))
              (need-read t)
+             handled
              char raw-val parsed target mod-override fb-override binding char2)
         (while need-read
           (setq char (funcall leader--event-reader (leader--prompt keys modifier)))
@@ -587,18 +632,29 @@ Uses `leader--event-reader' for reading events and
           (setq target (car parsed))
           (setq mod-override (cadr parsed))
           (setq fb-override (caddr parsed))
-          (cond
-           ;; "C-" dispatch (toggle): if keys + char is a command, use it;
-           ;; otherwise toggle modifier and read next char
+          (setq handled nil)
+          ;; Prefer-command: for modifier/direct dispatches, check command first
+          (when (and leader-prefer-command-over-dispatch target
+                     (not (string= target "C-")))
+            (let ((cmd-key (leader--apply-modifier keys modifier fb-context char)))
+              (when (commandp (leader--lookup-key cmd-key) t)
+                (setq keys cmd-key)
+                (setq modifier modifier-default)
+                (setq fb-context fallback-modifier)
+                (setq need-read nil)
+                (setq handled t))))
+           (unless handled
+             (cond
+              ;; "C-" dispatch (toggle)
            ((and target (string= target "C-"))
             (let ((char-key (concat keys " " (single-key-description char))))
-              (if (commandp (leader--lookup-key char-key) t)
+              (if (and leader-prefer-command-over-dispatch
+                       (commandp (leader--lookup-key char-key) t))
                   (progn (setq keys char-key)
                          (setq need-read nil))
                 (setq modifier toggle-target))))
            ;; Modifier prefix ending with "-" (like "M-", "C-M-")
            ((and target (string-suffix-p "-" target))
-            ;; Extract static prefix from multi-part targets like "C-x M-"
             (let* ((parts (split-string target " "))
                    (prefix (when (cdr parts)
                              (string-join (butlast parts) " "))))
@@ -606,7 +662,6 @@ Uses `leader--event-reader' for reading events and
                 (setq keys (if (string= keys default-prefix)
                                prefix
                              (concat keys " " prefix)))))
-            ;; Read second key with which-key popup (paging supported)
             (setq char2 (funcall leader--which-key-reader target modifier))
             (setq keys (concat target (single-key-description char2)))
             (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
@@ -620,10 +675,11 @@ Uses `leader--event-reader' for reading events and
             (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
             (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
             (setq need-read nil))
-           ;; No dispatch match: if leader char pressed, implicit toggle
-           ((and (null target) (eq char leader))
+           ;; No dispatch match: implicit toggle (leader double-press)
+           ((eq char leader)
             (let ((char-key (concat keys " " (single-key-description char))))
-              (if (commandp (leader--lookup-key char-key) t)
+              (if (and leader-prefer-command-over-dispatch
+                       (commandp (leader--lookup-key char-key) t))
                   (progn (setq keys char-key)
                          (setq need-read nil))
                 (setq modifier toggle-target))))
@@ -632,28 +688,67 @@ Uses `leader--event-reader' for reading events and
             (setq keys (leader--apply-modifier keys modifier fb-context char))
             (setq modifier modifier-default)
             (setq fb-context fallback-modifier)
-            (setq need-read nil))))
-        ;; Continue reading while binding is a prefix key (keymap)
+             (setq need-read nil)))))  ; t, cond, unless, while
+        ;; Continue reading while binding is a prefix keymap
         (setq binding (leader--lookup-key keys))
         (while (not (or (commandp binding t) (null binding)))
           (setq need-read t)
           (while need-read
             (setq char (funcall leader--event-reader (leader--prompt keys modifier)))
+            (setq raw-val (alist-get char dispatch-alist))
+            (setq parsed (leader--parse-dispatch raw-val))
+            (setq target (car parsed))
+            (setq mod-override (cadr parsed))
+            (setq fb-override (caddr parsed))
+            (setq handled nil)
+            ;; Prefer-command check in continuation
+            (when (and leader-prefer-command-over-dispatch target
+                       (not (string= target "C-")))
+              (let ((cmd-key (leader--apply-modifier keys modifier fb-context char)))
+                (when (commandp (leader--lookup-key cmd-key) t)
+                  (setq keys cmd-key)
+                  (setq modifier modifier-default)
+                  (setq fb-context fallback-modifier)
+                  (setq need-read nil)
+                  (setq handled t))))
+            (unless handled
             (cond
-             ;; Leader char pressed again: implicit toggle
-             ((eq char leader)
+             ;; "C-" dispatch (toggle)
+             ((and target (string= target "C-"))
               (let ((char-key (concat keys " " (single-key-description char))))
-                (if (commandp (leader--lookup-key char-key) t)
+                (if (and leader-prefer-command-over-dispatch
+                         (commandp (leader--lookup-key char-key) t))
                     (progn (setq keys char-key)
                            (setq need-read nil))
                   (setq modifier toggle-target))))
-             ;; Continuation keys: apply modifier logic only (no dispatch)
+             ;; Modifier prefix dispatch (continuation)
+             ((and target (string-suffix-p "-" target))
+              (setq char2 (funcall leader--which-key-reader target modifier))
+              (setq keys (concat keys " " target (single-key-description char2)))
+              (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
+              (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
+              (setq need-read nil))
+             ;; Direct match dispatch (continuation)
+             (target
+              (setq keys (concat keys " " target))
+              (setq modifier (if (eq mod-override 'default) modifier-default mod-override))
+              (setq fb-context (if (eq fb-override 'default) fallback-modifier fb-override))
+              (setq need-read nil))
+             ;; Implicit toggle (leader double-press)
+             ((eq char leader)
+              (let ((char-key (concat keys " " (single-key-description char))))
+                (if (and leader-prefer-command-over-dispatch
+                         (commandp (leader--lookup-key char-key) t))
+                    (progn (setq keys char-key)
+                           (setq need-read nil))
+                  (setq modifier toggle-target))))
+             ;; Modifier logic
              (t
               (setq keys (leader--apply-modifier keys modifier fb-context char))
               (setq modifier modifier-default)
               (setq fb-context fallback-modifier)
-              (setq need-read nil))))
-          (setq binding (leader--lookup-key keys)))
+               (setq need-read nil)))))  ; t, cond, unless, while
+           (setq binding (leader--lookup-key keys)))
         (kbd keys)))
      (t
       (vector leader)))))
