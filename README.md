@@ -110,10 +110,16 @@ When modifier is nil:
 
 ## Predicates for Pass-through
 
-Use `leader-pass-through-predicates` to define when the leader key should pass through as a normal key (e.g., in isearch or minibuffer):
+`leader-pass-through-predicates` controls when the leader key passes through as a normal key (e.g., SPC inserts a space). By default, pass through happens in the minibuffer and during isearch.
+
+Each element is either:
+- A function (or lambda): called with no arguments, pass through if non-nil.
+- A symbol: if bound as a variable, use its value; if bound as a function, call it.
 
 ```elisp
-(setq leader-pass-through-predicates '(isearch-mode minibufferp))
+;; Default value:
+(setq leader-pass-through-predicates
+      '(minibufferp isearch-mode))
 
 ;; For helix:
 (add-to-list 'leader-pass-through-predicates
@@ -122,6 +128,9 @@ Use `leader-pass-through-predicates` to define when the leader key should pass t
 ;; For evil:
 (add-to-list 'leader-pass-through-predicates
              (lambda () (evil-insert-state-p)))
+
+;; Pass through when a minor mode is active:
+(add-to-list 'leader-pass-through-predicates 'my-special-input-mode)
 ```
 
 ## Full Configuration Example
