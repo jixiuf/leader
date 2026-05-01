@@ -573,7 +573,7 @@ the (t ...) branch which returns (vector (aref vkeys (1- len)))."
     (should (assq ?e dispatch))
     (should (assq ?m dispatch))
     (should (assq ?h dispatch))
-    (should (assq ?c dispatch))
+    (should (assq ?s dispatch))
     (should (assq ?x dispatch))))
 
 (ert-deftest leader-test-default-config-dispatch-values ()
@@ -583,7 +583,7 @@ the (t ...) branch which returns (vector (aref vkeys (1- len)))."
     (should (equal (alist-get ?e dispatch) "C-M-"))
     (should (equal (alist-get ?m dispatch) "M-"))
     (should (equal (alist-get ?h dispatch) '("C-h" nil "C-")))
-    (should (equal (alist-get ?c dispatch) "C-c"))
+    (should (equal (alist-get ?s dispatch) '("M-s" nil "M-")))
     (should (equal (alist-get ?x dispatch) '("C-x" "C-" nil)))))
 
 

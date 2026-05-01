@@ -135,9 +135,14 @@
 ;;
 ;; After the initial dispatch resolves to a key sequence, if that
 ;; sequence is bound to a prefix keymap (not a command), leader
-;; continues reading keys.  Dispatch entries apply at every level
-;; (same as the first key), and modifier resets to modifier-default
-;; after each ordinary key.
+;; continues reading keys.  Modifier-type dispatch entries (ending
+;; in "-", like "M-", "C-M-") and toggle entries ("C-") apply at
+;; every level.  Direct-match dispatch entries (e.g. "C-x", "C-h")
+;; only apply at the top level, immediately after the leader key.
+;; After each ordinary key, modifier resets to modifier-default.
+;; Keys that don't match any dispatch are resolved via the modifier/
+;; fallback logic (trying plain key first when modifier is nil, or
+;; modifier+key first when modifier is set).
 ;;
 ;; Example (with modifier-default=nil, fallback-modifier="C-"):
 ;;
@@ -145,18 +150,23 @@
 ;;   Next key f:  modifier=nil -> try C-x f, no binding -> fallback to
 ;;   C-x C-f (via fallback-modifier="C-").  C-x C-f is a command -> done.
 ;;
-;; Example (dispatch in continuation):
+;; Example (modifier dispatch in continuation):
 ;;
-;;   Suppose C-c a is a prefix keymap, and dispatch has (?f . "M-")
-;;   and (?b . ("C-b" "C-")).
+;;   Suppose C-c a is a prefix keymap, and dispatch has (?f . "M-").
 ;;
 ;;   SPC a          -> C-c a (prefix, enter continuation)
 ;;   f              -> dispatch "M-" -> read second key with which-key
 ;;   g              -> C-c a M-g -> done (if bound to a command)
 ;;
-;;   SPC a          -> C-c a (prefix)
-;;   b              -> dispatch "C-b" (direct match)
-;;   f              -> C-c a C-b C-f -> done
+;; Example (fallback handles absent dispatch):
+;;
+;;   Suppose C-c a is a prefix keymap with no dispatch for ?b, but
+;;   C-c a C-b is a prefix keymap.
+;;
+;;   SPC a          -> C-c a (prefix, enter continuation)
+;;   b              -> try C-c a b (nil) -> fallback C-c a C-b -> prefix
+;;   f              -> try C-c a C-b f (nil) -> fallback C-c a C-b C-f
+;;   -> done
 ;;
 ;; Example (continuation with "C-" toggle):
 ;;
@@ -254,10 +264,10 @@
 (defcustom leader-keys
   '(("<SPC>" ("C-c" nil "C-")     ; prefix, modifier-default, fallback-modifier
      (?e . "C-M-")
-     (?m . "M-")                  ;spc m a=M-a
-     (?h . ("C-h" nil "C-"))      ;spc h k=C-h k (plain first, fallback C-)
-     (?c . "C-c")
-     (?x . ("C-x" "C-" nil))))    ;spc x f=C-x C-f (C- only, no plain fallback)
+     (?m . "M-")                  ;spc m a -> M-a
+     (?s . ("M-s" nil "M-"))      ;spc s h . -> M-s h . (plain first, fallback M-)
+     (?h . ("C-h" nil "C-"))      ;spc h k -> C-h k (plain first, fallback C-)
+     (?x . ("C-x" "C-" nil))))    ;spc x f -> C-x C-f (C- only, no plain fallback)
   "List of leader key configurations.
 Each element is a list (LEADER-KEY DEFAULT-PREFIX . DISPATCH-ALIST).
 LEADER-KEY is a key description string (kbd format).
@@ -757,15 +767,7 @@ bound command takes priority over a matching dispatch entry."
                 (setq fb-context (if (eq fb-override 'default)
                                      fallback-modifier fb-override))
                 (setq need-read nil))
-               ;; Direct match dispatch (continuation)
-               (target
-                (setq keys (concat keys " " target))
-                (setq modifier (if (eq mod-override 'default)
-                                   modifier-default mod-override))
-                (setq fb-context (if (eq fb-override 'default)
-                                     fallback-modifier fb-override))
-                (setq need-read nil))
-               ;; Implicit toggle (leader double-press)
+                ;; Implicit toggle (leader double-press)
                ((eq char leader)
                 (let ((char-key (concat keys " "
                                         (single-key-description char))))
