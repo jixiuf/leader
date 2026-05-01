@@ -510,6 +510,19 @@ Returns the resulting key string."
                    fb-key plain-key))))))
 
 
+;;; Prefix keymap resolution
+
+(defun leader--resolve-prefix-keymap (keys)
+  "Resolve KEYS to a prefix keymap, falling back to `current-global-map'.
+When `key-binding' returns a non-keymap (e.g. a transient map command),
+try `lookup-key' in the global map.  Returns the keymap or nil."
+  (let* ((kv (kbd keys))
+         (binding (key-binding kv)))
+    (cond ((keymapp binding) binding)
+          (t (let ((gm (lookup-key (current-global-map) kv)))
+               (and (keymapp gm) gm))))))
+
+
 ;;; which-key integration for modifier prefix dispatches
 
 (defun leader--collect-esc-bindings (keymap target seen)
@@ -592,8 +605,6 @@ CALLBACK is the function to call with each valid binding."
          ;; Exclude entries that have additional modifiers
          ;; (e.g., exclude M-C-a if target is M-)
          (not (string-match-p "[ACHMSs]-" rest))
-         ;; Filter out noisy events (mouse, scroll, etc.)
-         ;; (not (string-match-p leader--ignored-key-regexp rest))
           ;; Filter M-/C-M- digit keys and digit-argument from which-key
           (not (and (member target '("M-" "C-M-"))
                     (string-match-p "\\`[1-9]\\'" rest)
@@ -645,13 +656,7 @@ When MODIFIER is non-nil, modified keys are sorted first;
 when nil, plain keys are sorted first.  All bindings are shown
 regardless of modifier.
 Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
-  (let* ((prefix-keys (kbd keys))
-         (raw-binding (key-binding prefix-keys))
-         (map (if (keymapp raw-binding)
-                  raw-binding
-                ;; Transient map may shadow the real prefix keymap
-                (let ((gm (lookup-key (current-global-map) prefix-keys)))
-                  (and (keymapp gm) gm))))
+  (let* ((map (leader--resolve-prefix-keymap keys))
          bindings)
     (when (keymapp map)
       (map-keymap
@@ -702,15 +707,7 @@ Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
          (prefixed
           (if leader--continuation-p
               ;; Sub-prefix context: filter by actual binding at full key path
-              (let* ((raw-binding (key-binding (kbd keys)))
-                     (prefix-map
-                      (cond
-                       ((keymapp raw-binding) raw-binding)
-                       ;; key-binding may return a transient-map command
-                       ;; (e.g. which-key-C-h-dispatch); fall back to
-                       ;; the global map to find the real prefix keymap.
-                       (t (let ((gm (lookup-key (current-global-map) (kbd keys))))
-                            (and (keymapp gm) gm))))))
+              (let* ((prefix-map (leader--resolve-prefix-keymap keys)))
                 (delq nil
                       (mapcar (lambda (b)
                                 (let* ((mod-key (car b))
@@ -850,6 +847,99 @@ Returns the character read."
 
 ;;; Handler
 
+(defun leader--process-dispatch (char keys modifier fb-context
+                                      dispatch-alist default-prefix
+                                      modifier-default fallback-modifier
+                                      toggle-target leader-char continuation-p)
+  "Process a single dispatched character CHAR in the leader handler.
+Returns a plist (:keys KEYS :modifier MOD :fb-context FB :done BOOL).
+
+KEYS is the accumulated key sequence, MODIFIER the current modifier,
+FB-CONTEXT the fallback modifier context.
+DISPATCH-ALIST, DEFAULT-PREFIX, MODIFIER-DEFAULT, FALLBACK-MODIFIER,
+TOGGLE-TARGET, LEADER-CHAR and CONTINUATION-P provide handler context."
+  (let* ((raw-val (alist-get char dispatch-alist))
+         (parsed (leader--parse-dispatch raw-val))
+         (target (car parsed))
+         (mod-override (cadr parsed))
+         (fb-override (caddr parsed))
+         (done nil)
+         (new-mod modifier)
+         (new-fb fb-context))
+    ;; Prefer-command: for modifier/direct dispatches, check command first
+    (when target
+      (let ((cmd-key (leader--apply-modifier keys modifier fb-context char)))
+        (when (and (commandp (leader--lookup-key cmd-key) t)
+                   (leader--dispatch-command-wins-p
+                    target (leader--command-category
+                            keys modifier fb-context char))
+                   (not (string= target "C-")))
+          (setq keys cmd-key
+                new-mod modifier-default
+                new-fb fallback-modifier
+                done t))))
+    (unless done
+      (cond
+       ;; "C-" dispatch (toggle)
+       ((and target (string= target "C-"))
+        (let ((char-key (concat keys " " (single-key-description char))))
+          (if (and (leader--dispatch-command-wins-p target :command)
+                   (commandp (leader--lookup-key char-key) t))
+              (setq keys char-key done t)
+            (if continuation-p
+                (setq new-mod (if modifier nil (or fb-context "C-")))
+              (setq new-mod toggle-target)))))
+       ;; Modifier prefix ending with "-" (like "M-", "C-M-")
+       ((and target (string-suffix-p "-" target))
+        (let* ((parts (split-string target " "))
+               (prefix (when (cdr parts)
+                         (string-join (butlast parts) " "))))
+          (when prefix
+            (setq keys (if (and (not continuation-p)
+                                (string= keys default-prefix))
+                           prefix
+                         (concat keys " " prefix)))))
+        (let* ((leader--continuation-p (or continuation-p
+                                           leader--continuation-p))
+               (char2 (funcall leader--which-key-reader
+                               target modifier keys)))
+          (setq keys (if continuation-p
+                         (concat keys " " target
+                                 (single-key-description char2))
+                       (concat target (single-key-description char2)))))
+        (setq new-mod (if (eq mod-override 'default)
+                          modifier-default mod-override)
+              new-fb (if (eq fb-override 'default)
+                         fallback-modifier fb-override)
+              done t))
+       ;; Direct match for sequences like "C-x"
+       ((and target (not (string-suffix-p "-" target)))
+        (setq keys (if (and (not continuation-p)
+                            (string= keys default-prefix))
+                       target
+                     (concat keys " " target))
+              new-mod (if (eq mod-override 'default)
+                          modifier-default mod-override)
+              new-fb (if (eq fb-override 'default)
+                         fallback-modifier fb-override)
+              done t))
+       ;; No dispatch match: implicit toggle (leader double-press)
+       ((eq char leader-char)
+        (let ((char-key (concat keys " " (single-key-description char))))
+          (if (and (leader--dispatch-command-wins-p target :command)
+                   (commandp (leader--lookup-key char-key) t))
+              (setq keys char-key done t)
+            (if continuation-p
+                (setq new-mod (if modifier nil (or fb-context "C-")))
+              (setq new-mod toggle-target)))))
+       ;; No dispatch match: apply modifier logic
+       (t
+        (setq keys (leader--apply-modifier keys modifier fb-context char)
+              new-mod modifier-default
+              new-fb fallback-modifier
+              done t))))
+    (list :keys keys :modifier new-mod :fb-context new-fb :done done)))
+
 (defun leader--make-handler (default-prefix modifier-default
                                             dispatch-alist fallback-modifier)
   "Return a `key-translation-map' handler for a leader key.
@@ -914,159 +1004,42 @@ case a bound command takes priority over a matching dispatch entry."
              (which-key-this-command-keys-function
               (lambda () (kbd keys)))
              (need-read t)
-             handled
-             char raw-val parsed target mod-override
-             fb-override binding char2)
+             char result binding)
+        ;; First key read (top-level)
         (while need-read
           (setq char (leader--read-event-with-modifier-which-key
                       (leader--prompt keys modifier) modifier keys))
-          (setq raw-val (alist-get char dispatch-alist))
-          (setq parsed (leader--parse-dispatch raw-val))
-          (setq target (car parsed))
-          (setq mod-override (cadr parsed))
-          (setq fb-override (caddr parsed))
-           (setq handled nil)
-           ;; Prefer-command: for modifier/direct dispatches, check command first
-           (when target
-             (let ((cmd-key (leader--apply-modifier
-                             keys modifier fb-context char)))
-               (when (and (commandp (leader--lookup-key cmd-key) t)
-                          (leader--dispatch-command-wins-p
-                           target (leader--command-category
-                                   keys modifier fb-context char))
-                          (not (string= target "C-")))
-                (setq keys cmd-key)
-                (setq modifier modifier-default)
-                (setq fb-context fallback-modifier)
-                (setq need-read nil)
-                (setq handled t))))
-          (unless handled
-            (cond
-             ;; "C-" dispatch (toggle)
-             ((and target (string= target "C-"))
-               (let ((char-key (concat keys " " (single-key-description char))))
-                 (if (and (leader--dispatch-command-wins-p target :command)
-                          (commandp (leader--lookup-key char-key) t))
-                     (progn (setq keys char-key)
-                            (setq need-read nil))
-                   (setq modifier toggle-target))))
-              ;; Modifier prefix ending with "-" (like "M-", "C-M-")
-             ((and target (string-suffix-p "-" target))
-              (let* ((parts (split-string target " "))
-                     (prefix (when (cdr parts)
-                               (string-join (butlast parts) " "))))
-                (when prefix
-                  (setq keys (if (string= keys default-prefix)
-                                 prefix
-                               (concat keys " " prefix)))))
-              (setq char2 (funcall leader--which-key-reader target modifier keys))
-               (setq keys (concat target (single-key-description char2)))
-              (setq modifier (if (eq mod-override 'default)
-                                 modifier-default mod-override))
-              (setq fb-context (if (eq fb-override 'default)
-                                   fallback-modifier fb-override))
-              (setq need-read nil))
-             ;; Direct match for sequences like "C-x"
-             (target
-              (setq keys (if (string= keys default-prefix)
-                             (concat target)
-                           (concat keys " " target)))
-              (setq modifier (if (eq mod-override 'default)
-                                 modifier-default mod-override))
-              (setq fb-context (if (eq fb-override 'default)
-                                   fallback-modifier fb-override))
-              (setq need-read nil))
-             ;; No dispatch match: implicit toggle (leader double-press)
-              ((eq char leader)
-               (let ((char-key (concat keys " " (single-key-description char))))
-                  (if (and (leader--dispatch-command-wins-p target :command)
-                           (commandp (leader--lookup-key char-key) t))
-                     (progn (setq keys char-key)
-                            (setq need-read nil))
-                   (setq modifier toggle-target))))
-              ;; No dispatch match: apply modifier logic
-             (t
-              (setq keys (leader--apply-modifier keys modifier fb-context char))
-              (setq modifier modifier-default)
-              (setq fb-context fallback-modifier)
-              (setq need-read nil)))))  ; t, cond, unless, while
+          (setq result (leader--process-dispatch
+                        char keys modifier fb-context
+                        dispatch-alist default-prefix
+                        modifier-default fallback-modifier
+                        toggle-target leader nil))
+          (setq keys (plist-get result :keys)
+                modifier (plist-get result :modifier)
+                fb-context (plist-get result :fb-context)
+                need-read (not (plist-get result :done))))
         ;; Continue reading while binding is a prefix keymap
         (setq binding (leader--lookup-key keys))
-        ;; If a transient map shadows the real prefix (e.g. which-key
-        ;; rebinds C-h), fall back to the global map.
+        ;; If a transient map shadows the real prefix, fall back to global.
         (when (and (not (keymapp binding))
                    (not (null binding)))
-          (let ((gm (lookup-key (current-global-map) (kbd keys))))
-            (when (keymapp gm)
-              (setq binding gm))))
+          (let ((gm (leader--resolve-prefix-keymap keys)))
+            (when gm (setq binding gm))))
         (while (not (or (commandp binding t) (null binding)))
           (setq need-read t)
           (while need-read
             (let ((leader--continuation-p t))
               (setq char (leader--read-event-with-modifier-which-key
                           (leader--prompt keys modifier) modifier keys)))
-            (setq raw-val (alist-get char dispatch-alist))
-            (setq parsed (leader--parse-dispatch raw-val))
-            (setq target (car parsed))
-            (setq mod-override (cadr parsed))
-            (setq fb-override (caddr parsed))
-            (setq handled nil)
-            ;; Prefer-command check in continuation
-            (when target
-              (let ((cmd-key (leader--apply-modifier
-                              keys modifier fb-context char)))
-                (when (and (commandp (leader--lookup-key cmd-key) t)
-                           (leader--dispatch-command-wins-p
-                            target (leader--command-category
-                                    keys modifier fb-context char))
-                           (not (string= target "C-")))
-                  (setq keys cmd-key)
-                  (setq modifier modifier-default)
-                  (setq fb-context fallback-modifier)
-                  (setq need-read nil)
-                  (setq handled t))))
-            (unless handled
-              (cond
-               ;; "C-" dispatch (toggle)
-                ((and target (string= target "C-"))
-                 (let ((char-key (concat keys " "
-                                         (single-key-description char))))
-                   (if (and (leader--dispatch-command-wins-p target :command)
-                            (commandp (leader--lookup-key char-key) t))
-                       (progn (setq keys char-key)
-                              (setq need-read nil))
-                     (if modifier
-                         (setq modifier nil)
-                       (setq modifier (or fb-context "C-"))))))
-                ;; Modifier prefix dispatch (continuation)
-                 ((and target (string-suffix-p "-" target))
-                  (let ((leader--continuation-p t))
-                    (setq char2 (funcall leader--which-key-reader target modifier keys)))
-                (setq keys (concat keys " " target
-                                   (single-key-description char2)))
-                (setq modifier (if (eq mod-override 'default)
-                                   modifier-default mod-override))
-                (setq fb-context (if (eq fb-override 'default)
-                                     fallback-modifier fb-override))
-                (setq need-read nil))
-                ;; Implicit toggle (leader double-press)
-                ((eq char leader)
-                  (let ((char-key (concat keys " "
-                                          (single-key-description char))))
-                    (if (and (leader--dispatch-command-wins-p target :command)
-                             (commandp (leader--lookup-key char-key) t))
-                        (progn (setq keys char-key)
-                                (setq need-read nil))
-                      (if modifier
-                          (setq modifier nil)
-                        (setq modifier (or fb-context "C-"))))))
-               ;; Modifier logic
-               (t
-                (setq keys (leader--apply-modifier
-                            keys modifier fb-context char))
-                (setq modifier modifier-default)
-                (setq fb-context fallback-modifier)
-                (setq need-read nil)))))  ; t, cond, unless, while
+            (setq result (leader--process-dispatch
+                          char keys modifier fb-context
+                          dispatch-alist default-prefix
+                          modifier-default fallback-modifier
+                          toggle-target leader t))
+            (setq keys (plist-get result :keys)
+                  modifier (plist-get result :modifier)
+                  fb-context (plist-get result :fb-context)
+                  need-read (not (plist-get result :done))))
           (setq binding (leader--lookup-key keys)))
         (kbd keys)))
      (t
