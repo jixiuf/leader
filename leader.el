@@ -434,8 +434,12 @@ for fallback match.  Compares positions in
 Override for testing.  Default is `read-event'.")
 
 (defvar leader--which-key-reader #'leader--modifier-which-key-read
-  "Function to read a key with which-key popup, called with TARGET and MODIFIER.
-Override for testing.")
+  "Function to read a key with which-key popup.
+Called with TARGET, MODIFIER and KEYS.  KEYS is the accumulated
+key sequence prefix.  Override for testing.")
+
+(defvar leader--continuation-p nil
+  "Non-nil when invoking modifier which-key from a sub-prefix continuation.")
 
 (defvar leader--key-lookup-fn nil
   "If non-nil, a function (KEY-STRING) used instead of `key-binding'/`kbd'.
@@ -576,7 +580,6 @@ group shorter names sort first, then alphabetically."
        map))
     (sort (nreverse bindings) #'leader--binding-sort-predicate)))
 
-
 (defun leader--process-binding (desc rest def target seen callback)
   "Validate and format a binding before adding it to the results.
 DESC is the full key string, REST is the part after the prefix,
@@ -629,15 +632,38 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
          (page-n (car (which-key--pages-page-nums which-key--pages-obj))))
     (format "  page %d/%d  [n]ext [p]rev" page-n n-pages)))
 
-(defun leader--modifier-which-key-prepare (target)
+(defun leader--command-name (binding fallback)
+  "Return command name for BINDING, or FALLBACK if not a command."
+  (cond ((keymapp binding) "prefix")
+        ((commandp binding) (symbol-name binding))
+        (t fallback)))
+
+(defun leader--modifier-which-key-prepare (target keys)
   "Collect which-key bindings for TARGET modifier.
+KEYS is the accumulated key sequence prefix.
 Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
-  (let ((raw (leader--collect-modifier-bindings target)))
-    (when raw
-      (let ((formatted (which-key--format-and-replace raw)))
+  (let* ((raw (leader--collect-modifier-bindings target))
+         (prefixed
+          (if leader--continuation-p
+              ;; Sub-prefix context: filter by actual binding at full key path
+              (delq nil
+                    (mapcar (lambda (b)
+                              (let* ((full-key (concat keys " " (car b)))
+                                     (binding (leader--lookup-key full-key)))
+                                (when (or (commandp binding) (keymapp binding))
+                                  (cons full-key
+                                        (leader--command-name binding (cdr b))))))
+                            raw))
+            ;; Top-level: show all M-* bindings as-is
+            raw)))
+    (when prefixed
+      (let ((formatted (which-key--format-and-replace prefixed t)))
         (when formatted
           (setq which-key--pages-obj
-                (which-key--create-pages formatted nil target)))))))
+                (which-key--create-pages formatted nil
+                                         (if leader--continuation-p
+                                             (concat keys " " target)
+                                           target))))))))
 
 (defun leader--modifier-which-key-show-popup (popup-shown-cell)
   "Ensure the which-key popup is visible.
@@ -648,12 +674,15 @@ Sets POPUP-SHOWN-CELL to t and shows the popup if not already showing."
       (message "%s" (leader--which-key-page-hint))))
   (setcar popup-shown-cell t))
 
-(defun leader--modifier-which-key-build-prompt (target modifier popup-shown-cell)
-  "Build prompt for `read-event' using TARGET and MODIFIER.
+(defun leader--modifier-which-key-build-prompt (target _modifier popup-shown-cell keys)
+  "Build prompt for `read-event' using TARGET, MODIFIER and KEYS.
 POPUP-SHOWN-CELL is a cons cell whose car is t when the popup is
 visible.  When the popup is visible and multiple pages exist,
 append a paging hint to the prompt."
-  (let ((prompt (leader--prompt target modifier)))
+  (let ((prompt (leader--prompt (if leader--continuation-p
+                                    (concat keys " " target)
+                                  target)
+                                nil)))
     (when (and (car popup-shown-cell)
                which-key-use-C-h-commands
                which-key--pages-obj
@@ -661,9 +690,10 @@ append a paging hint to the prompt."
       (setq prompt (concat prompt " [C-h n/p paging]")))
     prompt))
 
-(defun leader--modifier-which-key-read (target modifier)
+(defun leader--modifier-which-key-read (target modifier keys)
   "Show which-key popup filtered by TARGET modifier prefix.
 MODIFIER is the current modifier state (e.g. \"C-\" or nil).
+KEYS is the accumulated key sequence prefix.
 Collects bindings manually from active maps, avoiding which-key's
 internal filter which may misbehave with modifier prefix matching.
 Read a character with \\`C-h' n/p paging support.
@@ -674,13 +704,13 @@ Returns the character read."
         (popup-shown-cell (list nil))
         char)
     (leader--clear-which-key)
-    (when (leader--modifier-which-key-prepare target)
+    (when (leader--modifier-which-key-prepare target keys)
       ;; Wait for idle delay; user input interrupts the wait
       (when (sit-for which-key-idle-delay)
         (leader--modifier-which-key-show-popup popup-shown-cell)))
     (while (not char)
       (setq char (read-event (leader--modifier-which-key-build-prompt
-                              target modifier popup-shown-cell)))
+                              target modifier popup-shown-cell keys)))
       (if (and which-key-use-C-h-commands
                (numberp char) (= char help-char))
           (when (and which-key--pages-obj
@@ -808,8 +838,8 @@ case a bound command takes priority over a matching dispatch entry."
                   (setq keys (if (string= keys default-prefix)
                                  prefix
                                (concat keys " " prefix)))))
-              (setq char2 (funcall leader--which-key-reader target modifier))
-              (setq keys (concat target (single-key-description char2)))
+              (setq char2 (funcall leader--which-key-reader target modifier keys))
+               (setq keys (concat target (single-key-description char2)))
               (setq modifier (if (eq mod-override 'default)
                                  modifier-default mod-override))
               (setq fb-context (if (eq fb-override 'default)
@@ -880,8 +910,9 @@ case a bound command takes priority over a matching dispatch entry."
                          (setq modifier nil)
                        (setq modifier (or fb-context "C-"))))))
                 ;; Modifier prefix dispatch (continuation)
-               ((and target (string-suffix-p "-" target))
-                (setq char2 (funcall leader--which-key-reader target modifier))
+                 ((and target (string-suffix-p "-" target))
+                  (let ((leader--continuation-p t))
+                    (setq char2 (funcall leader--which-key-reader target modifier keys)))
                 (setq keys (concat keys " " target
                                    (single-key-description char2)))
                 (setq modifier (if (eq mod-override 'default)

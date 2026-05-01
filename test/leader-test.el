@@ -23,7 +23,7 @@ Returns nil for keys not in BINDINGS."
 
 (defun leader-test--which-key-reader (char)
   "Return a which-key reader that just returns CHAR."
-  (lambda (_target _modifier)
+  (lambda (_target _modifier _keys)
     char))
 
 (defmacro leader-test--with-handler-env (bindings events &rest body)
