@@ -1,6 +1,8 @@
 # leader.el
 
-A modal leader-key package for Emacs that intercepts one or more "leader keys" via `key-translation-map' and translates subsequent keystrokes into standard Emacs key sequences, so you can type `SPC f' instead of `C-c C-f', etc.
+A modal leader-key package for Emacs that intercepts one or more "leader keys" via
+`key-translation-map` and translates subsequent keystrokes into standard Emacs key sequences, so you
+can type `SPC x f` instead of `C-x C-f`, etc.
 
 ## Installation
 
