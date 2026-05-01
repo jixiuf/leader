@@ -624,7 +624,8 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
              (> (which-key--pages-num-pages which-key--pages-obj) 1))
     (setq which-key--pages-obj
           (which-key--pages-set-current-page which-key--pages-obj delta))
-    (which-key--show-page)))
+    (let ((which-key--automatic-display t))
+      (which-key--show-page))))
 
 (defun leader--which-key-page-hint ()
   "Return echo-area hint for paging."
@@ -638,6 +639,61 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
         ((commandp binding) (symbol-name binding))
         (t fallback)))
 
+(defun leader--which-key-prepare (keys modifier)
+  "Collect which-key bindings for prefix KEYS with MODIFIER context.
+When MODIFIER is non-nil, modified keys are sorted first;
+when nil, plain keys are sorted first.  All bindings are shown
+regardless of modifier.
+Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
+  (let* ((prefix-keys (kbd keys))
+         (raw-binding (key-binding prefix-keys))
+         (map (if (keymapp raw-binding)
+                  raw-binding
+                ;; Transient map may shadow the real prefix keymap
+                (let ((gm (lookup-key (current-global-map) prefix-keys)))
+                  (and (keymapp gm) gm))))
+         bindings)
+    (when (keymapp map)
+      (map-keymap
+       (lambda (ev def)
+         (unless (or (eq def 'undefined)
+                     (eq ev 'which-key))
+           (let* ((key-desc (key-description (vector ev)))
+                  (full-desc (concat keys " " key-desc)))
+             (when (and (not (string-match-p
+                              "\\(?:<mouse\\|<wheel\\|<drag\\|<down-\\|<vertical\\)"
+                              full-desc))
+                        (not (and (member key-desc
+                                         '("1" "2" "3" "4" "5" "6" "7" "8" "9"))
+                                  (eq def 'digit-argument))))
+               (push (cons full-desc
+                           (cond ((keymapp def) "prefix")
+                                 ((symbolp def) (symbol-name def))
+                                 (t (format "%s" def))))
+                     bindings)))))
+       map)
+      ;; Sort: modifier-matching keys first when modifier active,
+      ;; plain keys first when no modifier.
+      (setq bindings (nreverse bindings))
+      (when bindings
+        (let* ((prefix-len (1+ (length keys))) ; "keys " length
+               (mod-match-p
+                (lambda (b)
+                  (let ((suffix (substring (car b) prefix-len)))
+                    (string-match-p "[ACHMSs]-" suffix))))
+               (modified (seq-filter mod-match-p bindings))
+               (plain (seq-remove mod-match-p bindings))
+               (sorted-mod (sort modified #'leader--binding-sort-predicate))
+               (sorted-plain (sort plain #'leader--binding-sort-predicate))
+               (sorted (if modifier
+                           (append sorted-mod sorted-plain)
+                         (append sorted-plain sorted-mod))))
+          (when sorted
+            (let ((formatted (which-key--format-and-replace sorted)))
+              (when formatted
+                (setq which-key--pages-obj
+                      (which-key--create-pages formatted nil keys))))))))))
+
 (defun leader--modifier-which-key-prepare (target keys)
   "Collect which-key bindings for TARGET modifier.
 KEYS is the accumulated key sequence prefix.
@@ -646,18 +702,36 @@ Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
          (prefixed
           (if leader--continuation-p
               ;; Sub-prefix context: filter by actual binding at full key path
-              (delq nil
-                    (mapcar (lambda (b)
-                              (let* ((full-key (concat keys " " (car b)))
-                                     (binding (leader--lookup-key full-key)))
-                                (when (or (commandp binding) (keymapp binding))
-                                  (cons full-key
-                                        (leader--command-name binding (cdr b))))))
-                            raw))
+              (let* ((raw-binding (key-binding (kbd keys)))
+                     (prefix-map
+                      (cond
+                       ((keymapp raw-binding) raw-binding)
+                       ;; key-binding may return a transient-map command
+                       ;; (e.g. which-key-C-h-dispatch); fall back to
+                       ;; the global map to find the real prefix keymap.
+                       (t (let ((gm (lookup-key (current-global-map) (kbd keys))))
+                            (and (keymapp gm) gm))))))
+                (delq nil
+                      (mapcar (lambda (b)
+                                (let* ((mod-key (car b))
+                                       (full-key (concat keys " " mod-key))
+                                       ;; Look up in the prefix keymap directly
+                                       ;; to avoid help-char interference
+                                       (binding
+                                        (if (keymapp prefix-map)
+                                            (let ((found (lookup-key
+                                                          prefix-map
+                                                          (kbd mod-key))))
+                                              (if (numberp found) nil found))
+                                          (leader--lookup-key full-key))))
+                                  (when (or (commandp binding) (keymapp binding))
+                                    (cons full-key
+                                          (leader--command-name binding (cdr b))))))
+                              raw)))
             ;; Top-level: show all M-* bindings as-is
             raw)))
     (when prefixed
-      (let ((formatted (which-key--format-and-replace prefixed t)))
+      (let ((formatted (which-key--format-and-replace prefixed)))
         (when formatted
           (setq which-key--pages-obj
                 (which-key--create-pages formatted nil
@@ -665,11 +739,57 @@ Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
                                              (concat keys " " target)
                                            target))))))))
 
+(defun leader--read-event-with-modifier-which-key (prompt modifier keys)
+  "Read an event showing custom which-key popup.
+PROMPT is the echo-area prompt, MODIFIER is the current modifier
+string and KEYS is the accumulated key sequence prefix.
+When MODIFIER is non-nil, shows a filtered popup with only the
+modified bindings.  When MODIFIER is nil, shows all bindings under
+KEYS using standard which-key display.  Supports C-h n/p paging."
+  (let ((which-key-inhibit t)
+        (popup-shown-cell (list nil))
+        (paging-key (and which-key-paging-key
+                         (kbd which-key-paging-key)))
+        char)
+    (which-key--hide-popup)
+    (when (leader--which-key-prepare keys modifier)
+      (when (and (eq leader--event-reader #'read-event)
+                 (sit-for which-key-idle-delay))
+        (leader--modifier-which-key-show-popup popup-shown-cell)))
+    (while (not char)
+      (let ((p prompt))
+        (when (and (car popup-shown-cell)
+                   which-key-use-C-h-commands
+                   which-key--pages-obj
+                   (> (which-key--pages-num-pages which-key--pages-obj) 1))
+          (setq p (concat p " [C-h n/p paging]")))
+        (setq char (funcall leader--event-reader p)))
+      (if (and which-key-use-C-h-commands
+               (numberp char) (= char help-char))
+          (when (and which-key--pages-obj
+                     (> (which-key--pages-num-pages which-key--pages-obj) 1))
+            (leader--modifier-which-key-show-popup popup-shown-cell)
+            (let ((ch (funcall leader--event-reader
+                               (leader--which-key-page-hint))))
+              (cond ((eq ch ?n) (leader--which-key-next-page 1))
+                    ((eq ch ?p) (leader--which-key-next-page -1))))
+            (setq char nil))
+        (when (and paging-key (equal (vector char) paging-key))
+          (leader--modifier-which-key-show-popup popup-shown-cell)
+          (leader--which-key-next-page 1)
+          (setq char nil))))
+    (which-key--hide-popup)
+    char))
+
 (defun leader--modifier-which-key-show-popup (popup-shown-cell)
   "Ensure the which-key popup is visible.
-Sets POPUP-SHOWN-CELL to t and shows the popup if not already showing."
+Sets POPUP-SHOWN-CELL to t and shows the popup if not already showing.
+Binds `which-key--automatic-display' to t to prevent which-key
+from installing a transient map that would interfere with leader
+key lookups."
   (unless (which-key--popup-showing-p)
-    (which-key--show-page)
+    (let ((which-key--automatic-display t))
+      (which-key--show-page))
     (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
       (message "%s" (leader--which-key-page-hint))))
   (setcar popup-shown-cell t))
@@ -792,33 +912,29 @@ case a bound command takes priority over a matching dispatch entry."
              (fb-context fallback-modifier)
              (keys default-prefix)
              (which-key-this-command-keys-function
-              (lambda ()
-                (let ((k (kbd keys)))
-                  (if (and modifier (string-prefix-p "M" modifier))
-                      (vconcat k [?\e])
-                    k))))
+              (lambda () (kbd keys)))
              (need-read t)
              handled
              char raw-val parsed target mod-override
              fb-override binding char2)
         (while need-read
-          (setq char (funcall leader--event-reader
-                              (leader--prompt keys modifier)))
+          (setq char (leader--read-event-with-modifier-which-key
+                      (leader--prompt keys modifier) modifier keys))
           (setq raw-val (alist-get char dispatch-alist))
           (setq parsed (leader--parse-dispatch raw-val))
           (setq target (car parsed))
           (setq mod-override (cadr parsed))
           (setq fb-override (caddr parsed))
-          (setq handled nil)
-          ;; Prefer-command: for modifier/direct dispatches, check command first
-          (when target
-            (let ((cmd-key (leader--apply-modifier
-                            keys modifier fb-context char)))
-              (when (and (commandp (leader--lookup-key cmd-key) t)
-                         (leader--dispatch-command-wins-p
-                          target (leader--command-category
-                                  keys modifier fb-context char))
-                         (not (string= target "C-")))
+           (setq handled nil)
+           ;; Prefer-command: for modifier/direct dispatches, check command first
+           (when target
+             (let ((cmd-key (leader--apply-modifier
+                             keys modifier fb-context char)))
+               (when (and (commandp (leader--lookup-key cmd-key) t)
+                          (leader--dispatch-command-wins-p
+                           target (leader--command-category
+                                   keys modifier fb-context char))
+                          (not (string= target "C-")))
                 (setq keys cmd-key)
                 (setq modifier modifier-default)
                 (setq fb-context fallback-modifier)
@@ -876,11 +992,19 @@ case a bound command takes priority over a matching dispatch entry."
               (setq need-read nil)))))  ; t, cond, unless, while
         ;; Continue reading while binding is a prefix keymap
         (setq binding (leader--lookup-key keys))
+        ;; If a transient map shadows the real prefix (e.g. which-key
+        ;; rebinds C-h), fall back to the global map.
+        (when (and (not (keymapp binding))
+                   (not (null binding)))
+          (let ((gm (lookup-key (current-global-map) (kbd keys))))
+            (when (keymapp gm)
+              (setq binding gm))))
         (while (not (or (commandp binding t) (null binding)))
           (setq need-read t)
           (while need-read
-            (setq char (funcall leader--event-reader
-                                (leader--prompt keys modifier)))
+            (let ((leader--continuation-p t))
+              (setq char (leader--read-event-with-modifier-which-key
+                          (leader--prompt keys modifier) modifier keys)))
             (setq raw-val (alist-get char dispatch-alist))
             (setq parsed (leader--parse-dispatch raw-val))
             (setq target (car parsed))
