@@ -506,6 +506,10 @@ CALLBACK is the function to call with each valid binding."
          (not (string-match-p "[ACHMSs]-" rest))
          ;; Filter out noisy events (mouse, scroll, etc.)
          ;; (not (string-match-p leader--ignored-key-regexp rest))
+          ;; Filter M-/C-M- digit keys and digit-argument from which-key
+          (not (and (member target '("M-" "C-M-"))
+                    (string-match-p "\\`[1-9]\\'" rest)
+                    (eq def 'digit-argument)))
          ;; Ensure we don't list the same key twice if found in multiple maps
          (not (gethash desc seen)))
     (puthash desc t seen)
