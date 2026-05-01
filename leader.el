@@ -29,6 +29,12 @@
 ;; translates subsequent keystrokes into standard Emacs key sequences,
 ;; so you can type `SPC f' instead of `C-c C-f', etc.
 ;;
+;; Direct dispatch entries (e.g. `C-x', `C-h') only apply at the top
+;; level, immediately after the leader key.  Inside prefix-keymap
+;; continuations, keys resolve via modifier/fallback logic.  Toggle
+;; dispatches (`C-') and modifier-prefix dispatches (`M-', `C-M-')
+;; apply at every level.
+;;
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;; 1.  Quick start
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -305,8 +311,9 @@ The special target `C-' toggles the modifier state.
 When the leader key itself is not in the dispatch alist, pressing
 it also acts as an implicit toggle.
 
-NOTE: Dispatch entries apply at every level.  After entering a prefix
-keymap, subsequent keys also consult the dispatch alist.  When
+NOTE: Direct dispatch entries only apply at the top level
+\(immediately after the leader key).  Toggle and modifier-prefix
+dispatches apply at every level.  When
 `leader-dispatch-priority' gives priority to commands, a
 bound command takes priority over a matching dispatch entry."
   :group 'leader
@@ -866,6 +873,12 @@ TOGGLE-TARGET, LEADER-CHAR and CONTINUATION-P provide handler context."
          (done nil)
          (new-mod modifier)
          (new-fb fb-context))
+    ;; Direct dispatch entries (e.g. "C-x", "C-h") only apply at top
+    ;; level, not inside prefix-keymap continuation.  Toggle and
+    ;; modifier-prefix dispatches still apply at every level.
+    (when (and continuation-p target
+               (eq (leader--dispatch-category target) :dispatch))
+      (setq target nil))
     ;; Prefer-command: for modifier/direct dispatches, check command first
     (when target
       (let ((cmd-key (leader--apply-modifier keys modifier fb-context char)))
@@ -989,7 +1002,8 @@ fallback modifier, and TOGGLE-TARGET is the toggle modifier.
 Uses `leader--event-reader' for reading events and
 `leader--key-lookup-fn' for key lookups when set.
 
-Dispatch entries apply at every level unless
+Direct dispatch entries apply only at the top level.  Toggle and
+modifier-prefix dispatches apply at every level unless
 `leader-dispatch-priority' gives priority to commands, in which
 case a bound command takes priority over a matching dispatch entry."
   (let* ((len (length vkeys))

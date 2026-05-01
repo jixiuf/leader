@@ -725,7 +725,7 @@ If so, it uses it directly without toggling."
 ;;; Dispatch in continuation (prefix keymap)
 
 (ert-deftest leader-test-continuation-direct-dispatch ()
-  "Dispatch entries work inside continuation prefix maps."
+  "Direct dispatch entries are ignored in continuation; fallback logic resolves."
   (let ((prefix-map (make-sparse-keymap))
         (dispatch-prefix-map (make-sparse-keymap)))
     (leader-test--with-handler-env
@@ -733,8 +733,8 @@ If so, it uses it directly without toggling."
           ("C-c x C-b" . ,dispatch-prefix-map)
           ("C-c x C-b C-f" . next-line))
         '(?x ?b ?f)
-      ;; SPC x → C-c x (prefix), b → dispatch "C-b" (direct, goes to C-c x C-b prefix)
-      ;; C-c x C-b is a prefix → continue, f → C-f → done
+      ;; SPC x → C-c x (prefix), b → dispatch ignored in continuation,
+      ;; fallback: C-c x b (unbound) → C-c x C-b (prefix) → f → C-c x C-b C-f
       (let ((result (leader--run-handler
                      [? ]
                      "C-c" nil
@@ -743,7 +743,7 @@ If so, it uses it directly without toggling."
         (should (equal result (kbd "C-c x C-b C-f")))))))
 
 (ert-deftest leader-test-continuation-direct-dispatch-no-prefer ()
-  "Continuation direct dispatch with prefer-command=nil."
+  "Continuation direct dispatch ignored even with prefer-command=nil."
   (let ((prefix-map (make-sparse-keymap))
         (dispatch-prefix-map (make-sparse-keymap))
         (leader-dispatch-priority nil))
@@ -758,6 +758,25 @@ If so, it uses it directly without toggling."
                      (list (cons ?b '("C-b" "C-")))
                      "C-" "C-")))
         (should (equal result (kbd "C-c x C-b C-f")))))))
+
+(ert-deftest leader-test-continuation-dispatch-ignored-for-command ()
+  "Direct dispatch (?h -> C-h) is ignored in continuation; plain key resolves.
+SPC x h should produce C-x h, not dispatch to C-h prefix."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("C-x" . ,prefix-map)
+          ("C-x h" . mark-whole-buffer))
+        '(?x ?h)
+      ;; (?h . ("C-h" nil "C-")) is a direct dispatch, ignored in continuation.
+      ;; modifier="C-" after C-x dispatch → try C-x C-h (nil) → fallback to
+      ;; C-x h (mark-whole-buffer) → done.
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?x '("C-x" "C-" nil))
+                           (cons ?h '("C-h" nil "C-")))
+                     "C-" "C-")))
+        (should (equal result (kbd "C-x h")))))))
 
 (ert-deftest leader-test-continuation-modifier-prefix-dispatch ()
   "Continuation modifier prefix dispatch with which-key."
