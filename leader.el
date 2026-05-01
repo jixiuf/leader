@@ -869,15 +869,17 @@ case a bound command takes priority over a matching dispatch entry."
             (unless handled
               (cond
                ;; "C-" dispatch (toggle)
-               ((and target (string= target "C-"))
-                (let ((char-key (concat keys " "
-                                        (single-key-description char))))
-                  (if (and (leader--dispatch-command-wins-p target :command)
-                           (commandp (leader--lookup-key char-key) t))
-                      (progn (setq keys char-key)
-                             (setq need-read nil))
-                    (setq modifier toggle-target))))
-               ;; Modifier prefix dispatch (continuation)
+                ((and target (string= target "C-"))
+                 (let ((char-key (concat keys " "
+                                         (single-key-description char))))
+                   (if (and (leader--dispatch-command-wins-p target :command)
+                            (commandp (leader--lookup-key char-key) t))
+                       (progn (setq keys char-key)
+                              (setq need-read nil))
+                     (if modifier
+                         (setq modifier nil)
+                       (setq modifier (or fb-context "C-"))))))
+                ;; Modifier prefix dispatch (continuation)
                ((and target (string-suffix-p "-" target))
                 (setq char2 (funcall leader--which-key-reader target modifier))
                 (setq keys (concat keys " " target
@@ -888,14 +890,16 @@ case a bound command takes priority over a matching dispatch entry."
                                      fallback-modifier fb-override))
                 (setq need-read nil))
                 ;; Implicit toggle (leader double-press)
-               ((eq char leader)
-                 (let ((char-key (concat keys " "
-                                         (single-key-description char))))
-                   (if (and (leader--dispatch-command-wins-p target :command)
-                            (commandp (leader--lookup-key char-key) t))
-                       (progn (setq keys char-key)
-                               (setq need-read nil))
-                     (setq modifier toggle-target))))
+                ((eq char leader)
+                  (let ((char-key (concat keys " "
+                                          (single-key-description char))))
+                    (if (and (leader--dispatch-command-wins-p target :command)
+                             (commandp (leader--lookup-key char-key) t))
+                        (progn (setq keys char-key)
+                                (setq need-read nil))
+                      (if modifier
+                          (setq modifier nil)
+                        (setq modifier (or fb-context "C-"))))))
                ;; Modifier logic
                (t
                 (setq keys (leader--apply-modifier

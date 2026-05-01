@@ -469,6 +469,25 @@ BODY runs with mock event reader and key lookup."
                      "C-" nil)))          ; toggle-target=nil
         (should (equal result (kbd "C-c x f")))))))
 
+(ert-deftest leader-test-handler-continuation-toggle-uses-fb-context ()
+  "Toggle SPC inside prefix uses fb-context not hardcoded toggle-target.
+After dispatch sets fb-context to M-, SPC toggle should set modifier
+to M-, not to C- from the top-level toggle-target."
+  (let ((prefix-map (make-sparse-keymap)))
+    (leader-test--with-handler-env
+        `(("M-s" . ,prefix-map)
+          ("M-s M-w" . next-line))
+        '(?s ?  ?w)                       ; s → M-s prefix, SPC toggle, w plain
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil            ; mod-default=nil
+                     `((?s . ("M-s" nil "M-")))
+                     "C-" "C-")))         ; fb="C-", toggle-target="C-"
+        ;; After s dispatch: modifier=nil, fb-context=M-
+        ;; SPC toggles modifier to fb-context=M- (not C-)
+        ;; Then w with modifier=M- → M-s M-w
+        (should (equal result (kbd "M-s M-w")))))))
+
 (ert-deftest leader-test-handler-continuation-fallback ()
   "Continuation with modifier=nil, plain unbound, fallback C- bound."
   (let ((prefix-map (make-sparse-keymap)))
