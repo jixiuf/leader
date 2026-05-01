@@ -570,7 +570,11 @@ Returns the character read."
               (message "%s" (leader--which-key-page-hint)))))))
     ;; Read loop with C-h n/p paging
     (while (not char)
-      (setq char (read-event (leader--prompt target modifier)))
+      (let ((prompt (leader--prompt target modifier)))
+        (when (and which-key-use-C-h-commands which-key--pages-obj
+                   (> (which-key--pages-num-pages which-key--pages-obj) 1))
+          (setq prompt (concat prompt " [C-h n/p paging]")))
+        (setq char (read-event prompt)))
       (if (and which-key-use-C-h-commands
                (numberp char) (= char help-char))
           (when (and which-key--pages-obj
