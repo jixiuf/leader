@@ -544,6 +544,38 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
          (page-n (car (which-key--pages-page-nums which-key--pages-obj))))
     (format "  page %d/%d  [n]ext [p]rev" page-n n-pages)))
 
+(defun leader--modifier-which-key-prepare (target)
+  "Collect which-key bindings for TARGET modifier.
+Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
+  (let ((raw (leader--collect-modifier-bindings target)))
+    (when raw
+      (let ((formatted (which-key--format-and-replace raw)))
+        (when formatted
+          (setq which-key--pages-obj
+                (which-key--create-pages formatted nil target)))))))
+
+(defun leader--modifier-which-key-show-popup (popup-shown-cell)
+  "Ensure the which-key popup is visible.
+Sets POPUP-SHOWN-CELL to t and shows the popup if not already showing."
+  (unless (which-key--popup-showing-p)
+    (which-key--show-page)
+    (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
+      (message "%s" (leader--which-key-page-hint))))
+  (setcar popup-shown-cell t))
+
+(defun leader--modifier-which-key-build-prompt (target modifier popup-shown-cell)
+  "Build prompt for `read-event' using TARGET and MODIFIER.
+POPUP-SHOWN-CELL is a cons cell whose car is t when the popup is
+visible.  When the popup is visible and multiple pages exist,
+append a paging hint to the prompt."
+  (let ((prompt (leader--prompt target modifier)))
+    (when (and (car popup-shown-cell)
+               which-key-use-C-h-commands
+               which-key--pages-obj
+               (> (which-key--pages-num-pages which-key--pages-obj) 1))
+      (setq prompt (concat prompt " [C-h n/p paging]")))
+    prompt))
+
 (defun leader--modifier-which-key-read (target modifier)
   "Show which-key popup filtered by TARGET modifier prefix.
 MODIFIER is the current modifier state (e.g. \"C-\" or nil).
@@ -554,39 +586,28 @@ Returns the character read."
   (let ((which-key-inhibit t)
         (paging-key (and which-key-paging-key
                          (kbd which-key-paging-key)))
+        (popup-shown-cell (list nil))
         char)
-    ;; Clear any previous which-key popup
     (leader--clear-which-key)
-    ;; Collect bindings and show popup
-    (let* ((which-key--automatic-display t)
-           (raw (leader--collect-modifier-bindings target)))
-      (when raw
-        (let ((formatted (which-key--format-and-replace raw)))
-          (when formatted
-            (setq which-key--pages-obj
-                  (which-key--create-pages formatted nil target))
-            (which-key--show-page)
-            (when (> (which-key--pages-num-pages which-key--pages-obj) 1)
-              (message "%s" (leader--which-key-page-hint)))))))
-    ;; Read loop with C-h n/p paging
+    (when (leader--modifier-which-key-prepare target)
+      ;; Wait for idle delay; user input interrupts the wait
+      (when (sit-for which-key-idle-delay)
+        (leader--modifier-which-key-show-popup popup-shown-cell)))
     (while (not char)
-      (let ((prompt (leader--prompt target modifier)))
-        (when (and which-key-use-C-h-commands which-key--pages-obj
-                   (> (which-key--pages-num-pages which-key--pages-obj) 1))
-          (setq prompt (concat prompt " [C-h n/p paging]")))
-        (setq char (read-event prompt)))
+      (setq char (read-event (leader--modifier-which-key-build-prompt
+                              target modifier popup-shown-cell)))
       (if (and which-key-use-C-h-commands
                (numberp char) (= char help-char))
           (when (and which-key--pages-obj
                      (> (which-key--pages-num-pages which-key--pages-obj) 1))
+            (leader--modifier-which-key-show-popup popup-shown-cell)
             (let ((ch (read-event (leader--which-key-page-hint))))
               (cond ((eq ch ?n) (leader--which-key-next-page 1))
                     ((eq ch ?p) (leader--which-key-next-page -1))))
-            (message "%s" (leader--which-key-page-hint))
             (setq char nil))
         (when (and paging-key (equal (vector char) paging-key))
+          (leader--modifier-which-key-show-popup popup-shown-cell)
           (leader--which-key-next-page 1)
-          (message "%s" (leader--which-key-page-hint))
           (setq char nil))))
     (which-key--hide-popup)
     char))
