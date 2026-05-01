@@ -153,13 +153,13 @@ dispatch alist.
 
 ### `leader-prefer-command-over-dispatch`
 
-When non-nil (default), if a pressed key matches a dispatch entry AND
+When non-nil, if a pressed key matches a dispatch entry AND
 also resolves to a bound command via modifier/fallback logic, the command
-takes priority.
+takes priority.  Defaults to nil (dispatch always wins).
 
 ```elisp
-(setq leader-prefer-command-over-dispatch t)  ; default: prefer commands
-(setq leader-prefer-command-over-dispatch nil) ; dispatch always wins
+(setq leader-prefer-command-over-dispatch t)  ; prefer commands
+(setq leader-prefer-command-over-dispatch nil) ; default: dispatch always wins
 
 ;; Example: dispatch has (?e . "C-M-"), and "C-c e" is a bound command
 ;; With prefer-command=t:  SPC e → executes C-c e (command wins)
@@ -222,7 +222,7 @@ takes priority.
 
 - `leader-keys` - List of leader key configurations
 - `leader-pass-through-predicates` - List of predicates for pass-through
-- `leader-prefer-command-over-dispatch` - Prefer bound commands over dispatch entries (default t)
+- `leader-prefer-command-over-dispatch` - Prefer bound commands over dispatch entries (default nil)
 
 ## Comparison with Other Leader Key Packages
 

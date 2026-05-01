@@ -239,7 +239,7 @@
 ;; 9.  `leader-prefer-command-over-dispatch'
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;; When non-nil (default), if a key matches a dispatch entry but also
+;; When non-nil, if a key matches a dispatch entry but also
 ;; resolves to a bound command under the current modifier logic, the
 ;; command is executed instead of dispatching.
 ;;
@@ -299,7 +299,7 @@ it also acts as an implicit toggle.
 
 NOTE: Dispatch entries apply at every level.  After entering a prefix
 keymap, subsequent keys also consult the dispatch alist.  When
-`leader-prefer-command-over-dispatch' is non-nil (the default), a
+`leader-prefer-command-over-dispatch' is non-nil, a
 bound command takes priority over a matching dispatch entry."
   :group 'leader
   :type
@@ -334,7 +334,7 @@ Each element is either:
   :group 'leader
   :type '(repeat (choice function symbol)))
 
-(defcustom leader-prefer-command-over-dispatch t
+(defcustom leader-prefer-command-over-dispatch nil
   "Prefer executing a bound command over following a dispatch entry.
 When non-nil, if a pressed key matches a dispatch entry AND the key
 \(with current modifier/fallback logic) resolves to a bound command,
