@@ -161,7 +161,8 @@ Categories (ordered by priority, higher first):
 - `:dispatch` — direct key sequences (e.g. `C-x`, `C-b`)
 - `:modifier-prefix` — modifier prefixes (e.g. `M-`, `C-M-`)
 - `:toggle` — modifier toggles (`C-` dispatch, leader double-press)
-- `:command` — bound commands
+- `:command` — primary bound commands (modifier or plain match)
+- `:command-fallback` — fallback bound commands (modifier-fallback match)
 
 ```elisp
 (setq leader-dispatch-priority nil)
@@ -169,20 +170,22 @@ Categories (ordered by priority, higher first):
 ;; '(:dispatch :modifier-prefix :toggle)
 
 (setq leader-dispatch-priority t)
-;; Commands always win.  Equivalent to:
-;; '(:command)
+;; Commands (primary and fallback) always win.  Equivalent to:
+;; '(:command :command-fallback)
 
-(setq leader-dispatch-priority '(:modifier-prefix :dispatch :command :toggle))
-;; Modifier prefixes and direct dispatches take priority over commands,
-;; commands take priority over toggles (toggle only when no command bound).
+(setq leader-dispatch-priority '(:modifier-prefix :dispatch :command :command-fallback :toggle))
+;; Modifier prefixes and direct dispatches take priority over primary
+;; commands, primary commands over fallback commands, fallback commands
+;; over toggles.
 
 ;; Example: dispatch has (?e . "M-"), and "C-c e" is a bound command
-;; With '(:modifier-prefix :dispatch :command :toggle):  SPC e → M-
-;; With '(:command :modifier-prefix):  SPC e → C-c e (command wins)
-;; With nil:  SPC e → M-
+;; With '(:modifier-prefix :dispatch :command :command-fallback :toggle):
+;;   SPC e → M- (dispatch wins)
+;; With '(:command :command-fallback :modifier-prefix):
+;;   SPC e → C-c e (command wins)
+;; With nil:
+;;   SPC e → M- (dispatch wins)
 ```
-
-Backward compatibility: `leader-prefer-command-over-dispatch` is an alias.
 
 ## Full Configuration Example
 

@@ -1101,6 +1101,53 @@ If so, it uses it directly without toggling."
                      "C-" "C-")))
         (should (equal result (kbd "C-c t")))))))
 
+(ert-deftest leader-test-dispatch-priority-fallback-wins-over-dispatch ()
+  ":command-fallback before :dispatch → fallback command wins."
+  (let ((leader-dispatch-priority '(:command-fallback :dispatch)))
+    (leader-test--with-handler-env
+        '(("C-c C-f" . next-line))
+        '(?f)
+      (let ((result (leader--run-handler
+                     [? ]
+                     "C-c" nil
+                     (list (cons ?f "C-x"))
+                     "C-" "C-")))
+        (should (equal result (kbd "C-c C-f")))))))
+
+(ert-deftest leader-test-dispatch-priority-dispatch-wins-over-fallback ()
+  ":dispatch before :command-fallback → dispatch wins."
+  (let ((leader-dispatch-priority '(:dispatch :command-fallback)))
+    (let ((prefix-map (make-sparse-keymap)))
+      (leader-test--with-handler-env
+          `(("C-c C-f" . next-line)
+            ("C-x" . ,prefix-map)
+            ("C-x C-g" . find-file))
+          '(?f ?g)
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?f "C-x"))
+                       "C-" "C-")))
+          (should (equal result (kbd "C-x C-g"))))))))
+
+(ert-deftest leader-test-dispatch-priority-primary-over-fallback ()
+  ":dispatch before both :command and :command-fallback → dispatch wins
+when fallback command is bound but plain command is not."
+  (let ((leader-dispatch-priority '(:dispatch :command :command-fallback)))
+    (let ((prefix-map (make-sparse-keymap)))
+      (leader-test--with-handler-env
+          `(("C-c C-f" . next-line)          ; fallback command only
+            ("C-x" . ,prefix-map)
+            ("C-x C-g" . find-file))
+          '(?f ?g)
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil              ; modifier=nil
+                       (list (cons ?f "C-x"))  ; direct dispatch
+                       "C-" "C-")))           ; "C-c f" unbound, "C-c C-f" fallback bound
+          ;; :dispatch before :command-fallback → dispatch wins
+          (should (equal result (kbd "C-x C-g"))))))))
+
 (ert-deftest leader-test-prefix-spec-string ()
   "String prefix spec: modifier-default='C-', fallback='C-'."
   (let* ((prefix-spec "C-c")

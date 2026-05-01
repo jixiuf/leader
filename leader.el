@@ -244,17 +244,18 @@
 ;;   :dispatch         - direct dispatch (e.g. C-x, C-b)
 ;;   :modifier-prefix  - modifier prefix (e.g. M-, C-M-)
 ;;   :toggle           - modifier toggle (C- dispatch, leader double-press)
-;;   :command          - bound commands
+;;   :command          - primary bound commands
+;;   :command-fallback - fallback bound commands
 ;;
 ;; When nil (default), dispatch always wins:
 ;;   Equivalent to '(:dispatch :modifier-prefix :toggle)
 ;;
 ;; When t, commands always win:
-;;   Equivalent to '(:command)
+;;   Equivalent to '(:command :command-fallback)
 ;;
-;; Custom priority, e.g. '(:modifier-prefix :dispatch :command :toggle):
-;;   SPC f    ; dispatch (?f . "M-") → modifier prefix wins over command
-;;   SPC f    ; dispatch (?f . "C-x") → direct dispatch wins over command
+;; Custom priority, e.g. '(:modifier-prefix :dispatch :command :command-fallback :toggle):
+;;   SPC f    ; dispatch (?f . "M-") → modifier prefix wins over any command
+;;   SPC f    ; dispatch (?f . "C-x") → direct dispatch wins over any command
 ;;   SPC t    ; dispatch (?t . "C-"), "C-c t" is a command → command wins
 ;;   SPC SPC  ; implicit toggle, "C-c SPC" is a command → command wins
 ;;   SPC t    ; dispatch (?t . "C-"), no command bound → toggle applies
@@ -344,15 +345,17 @@ Each element is either:
 (defcustom leader-dispatch-priority nil
   "Priority ordering for resolving dispatch vs. command conflicts.
 
-Each dispatch conflict category and :command are ordered by priority
-\(later elements defer to earlier ones).  When a key matches a dispatch
-entry AND resolves to a bound command, the higher-priority action wins.
+Each dispatch conflict category and command categories are ordered
+by priority \(later elements defer to earlier ones).  When a key matches
+a dispatch entry AND resolves to a bound command, the higher-priority
+action wins.
 
 Categories:
   :dispatch         - direct key sequences (e.g. C-x, C-b)
   :modifier-prefix  - modifier prefixes (e.g. M-, C-M-)
   :toggle           - modifier toggles (C- dispatch, leader double-press)
-  :command          - bound commands
+  :command          - primary bound commands (modifier or plain match)
+  :command-fallback - fallback bound commands (modifier-fallback match)
 
 Value nil (default):
   Dispatch always wins.  Equivalent to:
@@ -360,12 +363,13 @@ Value nil (default):
 
 Value t:
   Commands always win.  Equivalent to:
-  \\='(:command)
+  \\='(:command :command-fallback)
 
 Custom ordering, e.g.:
-  \\='(:modifier-prefix :dispatch :command :toggle)
-  modifier prefixes and direct dispatches take priority over commands,
-  commands take priority over toggles."
+  \\='(:modifier-prefix :dispatch :command :command-fallback :toggle)
+  modifier prefixes and direct dispatches take priority over primary
+  commands, primary commands over fallback commands, fallback commands
+  over toggles."
   :group 'leader
   :type '(choice (const :tag "Dispatch always wins" nil)
                  (const :tag "Command always wins" t)
@@ -373,15 +377,16 @@ Custom ordering, e.g.:
                          (choice (const :tag "Direct dispatch" :dispatch)
                                  (const :tag "Modifier prefix" :modifier-prefix)
                                  (const :tag "Modifier toggle" :toggle)
-                                  (const :tag "Bound command" :command)))))
+                                 (const :tag "Primary command" :command)
+                                 (const :tag "Fallback command" :command-fallback)))))
 
 (defun leader--dispatch-priority ()
   "Return canonical dispatch priority list.
 Backward-compatible: nil → (':dispatch :modifier-prefix :toggle),
-t → (':command)."
+t → (':command :command-fallback)."
   (pcase leader-dispatch-priority
     ('nil '(:dispatch :modifier-prefix :toggle))
-    ('t   '(:command))
+    ('t   '(:command :command-fallback))
     (_    leader-dispatch-priority)))
 
 (defun leader--dispatch-category (target)
@@ -392,15 +397,36 @@ Returns :modifier-prefix, :toggle, :dispatch, or nil for no target."
         ((string-suffix-p "-" target) :modifier-prefix)
         (t :dispatch)))
 
-(defun leader--dispatch-command-wins-p (target)
+(defun leader--command-category (base modifier fb-context char)
+  "Return the command category for a potential bound command.
+BASE is the accumulated key prefix, MODIFIER the current modifier,
+FB-CONTEXT the fallback modifier, CHAR the pressed character.
+Returns :command for a primary match (modifier+CHAR or plain CHAR),
+:command-fallback for a fallback match, nil if no command bound."
+  (let* ((desc (single-key-description char))
+         (mod-key (when modifier (concat base " " modifier desc)))
+         (plain-key (concat base " " desc))
+         (fb-key (when fb-context (concat base " " fb-context desc))))
+    (cond (modifier
+           (if (and mod-key (leader--lookup-key mod-key))
+               :command
+             (if (leader--lookup-key plain-key) :command-fallback nil)))
+          ((leader--lookup-key plain-key) :command)
+          ((and fb-key (leader--lookup-key fb-key)) :command-fallback)
+          (t nil))))
+
+(defun leader--dispatch-command-wins-p (target &optional command-category)
   "Return non-nil if command should take priority over dispatch TARGET.
-Compares positions in `leader--dispatch-priority' ordering."
+COMMAND-CATEGORY is :command for primary match or :command-fallback
+for fallback match.  Compares positions in
+`leader--dispatch-priority' ordering."
   (let* ((cat (leader--dispatch-category target))
          (prio (leader--dispatch-priority))
-         (cmd-pos (seq-position prio :command))
+         (cmd-cat (or command-category :command))
+         (cmd-pos (seq-position prio cmd-cat))
          (cat-pos (seq-position prio cat)))
-    (cond ((null cmd-pos) nil)   ; :command not in list → never wins
-          ((null cat-pos) t)     ; category not in list → command wins
+    (cond ((null cmd-pos) nil)   ; command category not in list → never wins
+          ((null cat-pos) t)     ; dispatch category not in list → command wins
           (t (< cmd-pos cat-pos))))) ; command earlier → command wins
 
 (defvar leader--event-reader #'read-event
@@ -750,11 +776,14 @@ case a bound command takes priority over a matching dispatch entry."
           (setq fb-override (caddr parsed))
           (setq handled nil)
           ;; Prefer-command: for modifier/direct dispatches, check command first
-          (when (and (leader--dispatch-command-wins-p target) target
-                     (not (string= target "C-")))
+          (when target
             (let ((cmd-key (leader--apply-modifier
                             keys modifier fb-context char)))
-              (when (commandp (leader--lookup-key cmd-key) t)
+              (when (and (commandp (leader--lookup-key cmd-key) t)
+                         (leader--dispatch-command-wins-p
+                          target (leader--command-category
+                                  keys modifier fb-context char))
+                         (not (string= target "C-")))
                 (setq keys cmd-key)
                 (setq modifier modifier-default)
                 (setq fb-context fallback-modifier)
@@ -764,8 +793,8 @@ case a bound command takes priority over a matching dispatch entry."
             (cond
              ;; "C-" dispatch (toggle)
              ((and target (string= target "C-"))
-              (let ((char-key (concat keys " " (single-key-description char))))
-                 (if (and (leader--dispatch-command-wins-p target)
+               (let ((char-key (concat keys " " (single-key-description char))))
+                 (if (and (leader--dispatch-command-wins-p target :command)
                           (commandp (leader--lookup-key char-key) t))
                      (progn (setq keys char-key)
                             (setq need-read nil))
@@ -799,12 +828,12 @@ case a bound command takes priority over a matching dispatch entry."
              ;; No dispatch match: implicit toggle (leader double-press)
               ((eq char leader)
                (let ((char-key (concat keys " " (single-key-description char))))
-                 (if (and (leader--dispatch-command-wins-p target)
-                          (commandp (leader--lookup-key char-key) t))
-                    (progn (setq keys char-key)
-                           (setq need-read nil))
-                  (setq modifier toggle-target))))
-             ;; No dispatch match: apply modifier logic
+                  (if (and (leader--dispatch-command-wins-p target :command)
+                           (commandp (leader--lookup-key char-key) t))
+                     (progn (setq keys char-key)
+                            (setq need-read nil))
+                   (setq modifier toggle-target))))
+              ;; No dispatch match: apply modifier logic
              (t
               (setq keys (leader--apply-modifier keys modifier fb-context char))
               (setq modifier modifier-default)
@@ -824,11 +853,14 @@ case a bound command takes priority over a matching dispatch entry."
             (setq fb-override (caddr parsed))
             (setq handled nil)
             ;; Prefer-command check in continuation
-            (when (and (leader--dispatch-command-wins-p target) target
-                       (not (string= target "C-")))
+            (when target
               (let ((cmd-key (leader--apply-modifier
                               keys modifier fb-context char)))
-                (when (commandp (leader--lookup-key cmd-key) t)
+                (when (and (commandp (leader--lookup-key cmd-key) t)
+                           (leader--dispatch-command-wins-p
+                            target (leader--command-category
+                                    keys modifier fb-context char))
+                           (not (string= target "C-")))
                   (setq keys cmd-key)
                   (setq modifier modifier-default)
                   (setq fb-context fallback-modifier)
@@ -840,7 +872,7 @@ case a bound command takes priority over a matching dispatch entry."
                ((and target (string= target "C-"))
                 (let ((char-key (concat keys " "
                                         (single-key-description char))))
-                  (if (and (leader--dispatch-command-wins-p target)
+                  (if (and (leader--dispatch-command-wins-p target :command)
                            (commandp (leader--lookup-key char-key) t))
                       (progn (setq keys char-key)
                              (setq need-read nil))
@@ -859,7 +891,7 @@ case a bound command takes priority over a matching dispatch entry."
                ((eq char leader)
                  (let ((char-key (concat keys " "
                                          (single-key-description char))))
-                   (if (and (leader--dispatch-command-wins-p target)
+                   (if (and (leader--dispatch-command-wins-p target :command)
                             (commandp (leader--lookup-key char-key) t))
                        (progn (setq keys char-key)
                                (setq need-read nil))
