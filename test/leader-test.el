@@ -581,13 +581,13 @@ the (t ...) branch which returns (vector (aref vkeys (1- len)))."
 
 (ert-deftest leader-test-default-config-spc-entry ()
   "Default config has SPC leader key."
-  (let ((entry (seq-find (lambda (e) (equal (car e) "<SPC>")) leader-keys)))
+  (let ((entry (cl-find "<SPC>" leader-keys :key #'car :test #'equal)))
     (should entry)
     (should (equal (cadr entry) '("C-c" nil "C-")))))
 
 (ert-deftest leader-test-default-config-dispatch-entries ()
   "Default SPC config has expected dispatch entries."
-  (let* ((spc (seq-find (lambda (e) (equal (car e) "<SPC>")) leader-keys))
+  (let* ((spc (cl-find "<SPC>" leader-keys :key #'car :test #'equal))
          (dispatch (cddr spc)))
     (should (assq ?e dispatch))
     (should (assq ?m dispatch))
@@ -597,7 +597,7 @@ the (t ...) branch which returns (vector (aref vkeys (1- len)))."
 
 (ert-deftest leader-test-default-config-dispatch-values ()
   "Default dispatch entries have expected values."
-  (let* ((spc (seq-find (lambda (e) (equal (car e) "<SPC>")) leader-keys))
+  (let* ((spc (cl-find "<SPC>" leader-keys :key #'car :test #'equal))
          (dispatch (cddr spc)))
     (should (equal (alist-get ?e dispatch) "C-M-"))
     (should (equal (alist-get ?m dispatch) "M-"))
