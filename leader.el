@@ -657,24 +657,45 @@ Bypasses `which-key-turn-page' to avoid `unread-command-events' side-effect."
         ((commandp binding) (symbol-name binding))
         (t fallback)))
 
-(defun leader--which-key-prepare (keys modifier)
-  "Collect which-key bindings for prefix KEYS with MODIFIER context.
-When MODIFIER is non-nil, modified keys are sorted first;
-when nil, plain keys are sorted first.  All bindings are shown
-regardless of modifier.
-Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
-  (let* ((map (leader--resolve-prefix-keymap keys))
-         bindings)
-    (when (keymapp map)
-      (map-keymap
-       (lambda (ev def)
-         (unless (or (eq def 'undefined)
-                     (eq ev 'which-key))
+(defun leader--collect-keymap-bindings (map keys)
+  "Collect bindings from MAP as alist of (FULL-DESC . COMMAND-NAME).
+KEYS is the accumulated key sequence prefix.  ESC sub-keymaps are
+expanded into M- bindings.  Mouse events and digit-argument
+bindings are filtered out."
+  (let (bindings)
+    (map-keymap
+     (lambda (ev def)
+       (unless (or (eq def 'undefined)
+                   (eq ev 'which-key))
+         (cond
+          ;; ESC prefix: expand into M- bindings
+          ((and (eq ev 27) (keymapp def))
+           (map-keymap
+            (lambda (sub-ev sub-def)
+              (unless (eq sub-def 'undefined)
+                (let* ((meta-ev (event-apply-modifier sub-ev 'meta 27 "M-"))
+                       (key-desc (key-description (vector meta-ev)))
+                       (full-desc (concat keys " " key-desc)))
+                  (when (and (not (string-match-p
+                                   "\\(?:<mouse\\|<wheel\\|<drag\\|<down-\\|<vertical\\)"
+                                   full-desc))
+                             (not (and (member key-desc
+                                               '("M-1" "M-2" "M-3" "M-4" "M-5"
+                                                 "M-6" "M-7" "M-8" "M-9"))
+                                       (eq sub-def 'digit-argument))))
+                    (push (cons full-desc
+                                (cond ((keymapp sub-def) "prefix")
+                                      ((symbolp sub-def) (symbol-name sub-def))
+                                      (t (format "%s" sub-def))))
+                          bindings)))))
+            def))
+          ;; Regular keys
+          (t
            (let* ((key-desc (key-description (vector ev)))
                   (full-desc (concat keys " " key-desc)))
              (when (and (not (string-match-p
-                              "\\(?:<mouse\\|<wheel\\|<drag\\|<down-\\|<vertical\\)"
-                              full-desc))
+                               "\\(?:<mouse\\|<wheel\\|<drag\\|<down-\\|<vertical\\)"
+                               full-desc))
                         (not (and (member key-desc
                                          '("1" "2" "3" "4" "5" "6" "7" "8" "9"))
                                   (eq def 'digit-argument))))
@@ -682,29 +703,45 @@ Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
                            (cond ((keymapp def) "prefix")
                                  ((symbolp def) (symbol-name def))
                                  (t (format "%s" def))))
-                     bindings)))))
-       map)
-      ;; Sort: modifier-matching keys first when modifier active,
-      ;; plain keys first when no modifier.
-      (setq bindings (nreverse bindings))
-      (when bindings
-        (let* ((prefix-len (1+ (length keys))) ; "keys " length
-               (mod-match-p
-                (lambda (b)
-                  (let ((suffix (substring (car b) prefix-len)))
-                    (string-match-p "[ACHMSs]-" suffix))))
-               (modified (seq-filter mod-match-p bindings))
-               (plain (seq-remove mod-match-p bindings))
-               (sorted-mod (sort modified #'leader--binding-sort-predicate))
-               (sorted-plain (sort plain #'leader--binding-sort-predicate))
-               (sorted (if modifier
-                           (append sorted-mod sorted-plain)
-                         (append sorted-plain sorted-mod))))
-          (when sorted
-            (let ((formatted (which-key--format-and-replace sorted)))
-              (when formatted
-                (setq which-key--pages-obj
-                      (which-key--create-pages formatted nil keys))))))))))
+                     bindings)))))))
+     map)
+    (nreverse bindings)))
+
+(defun leader--sort-and-display-bindings (bindings keys modifier)
+  "Sort BINDINGS, format them and set `which-key--pages-obj'.
+KEYS is the prefix string, MODIFIER determines sort order:
+when non-nil, modified keys are sorted first; when nil, plain keys first.
+Returns non-nil if pages were created."
+  (when bindings
+    (let* ((prefix-len (1+ (length keys)))
+           (mod-match-p
+            (lambda (b)
+              (let ((suffix (substring (car b) prefix-len)))
+                (string-match-p "[ACHMSs]-" suffix))))
+           (modified (seq-filter mod-match-p bindings))
+           (plain (seq-remove mod-match-p bindings))
+           (sorted-mod (sort modified #'leader--binding-sort-predicate))
+           (sorted-plain (sort plain #'leader--binding-sort-predicate))
+           (sorted (if modifier
+                       (append sorted-mod sorted-plain)
+                     (append sorted-plain sorted-mod))))
+      (when sorted
+        (let ((formatted (which-key--format-and-replace sorted)))
+          (when formatted
+            (setq which-key--pages-obj
+                  (which-key--create-pages formatted nil keys))))))))
+
+(defun leader--which-key-prepare (keys modifier)
+  "Collect which-key bindings for prefix KEYS with MODIFIER context.
+When MODIFIER is non-nil, modified keys are sorted first;
+when nil, plain keys are sorted first.  All bindings are shown
+regardless of modifier.
+Sets `which-key--pages-obj'.  Returns non-nil if pages were created."
+  (let ((map (leader--resolve-prefix-keymap keys)))
+    (when (keymapp map)
+      (leader--sort-and-display-bindings
+       (leader--collect-keymap-bindings map keys)
+       keys modifier))))
 
 (defun leader--modifier-which-key-prepare (target keys)
   "Collect which-key bindings for TARGET modifier.
