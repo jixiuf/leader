@@ -28,8 +28,13 @@ package-lint:
 		leader.el
 
 checkdoc:
-	$(EMACS) --batch -Q \
+	@$(EMACS) --batch -Q \
 		--eval "(require 'checkdoc)" \
+		--eval "(advice-add 'display-warning :around \
+		  (lambda (orig type msg &rest args) \
+		    (unless (string-match \"Keycode .* embedded in doc string\" \
+		                          (or msg \"\")) \
+		      (apply orig type msg args))))" \
 		--eval "(let ((sentence-end-double-space nil) \
 		              (checkdoc-proper-noun-list nil) \
 		              (checkdoc-verb-check-experimental-flag nil) \

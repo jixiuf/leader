@@ -69,8 +69,8 @@ defaults to `modifier-default`.
 ## Dispatch Entry Types
 
 Dispatch entries apply at **every level**, including inside prefix keymaps
-(after entering a prefix like `C-x`). Use `leader-prefer-command-over-dispatch`
-(non-nil by default) to give bound commands priority over matching dispatch entries.
+(after entering a prefix like `C-x`). Use `leader-dispatch-priority`
+to control priority between bound commands and dispatch entries.
 
 ### Prefix Switch
 
@@ -151,20 +151,38 @@ dispatch alist.
 ;;   Then f → C-c a C-b C-f
 ```
 
-### `leader-prefer-command-over-dispatch`
+### `leader-dispatch-priority`
 
-When non-nil, if a pressed key matches a dispatch entry AND
-also resolves to a bound command via modifier/fallback logic, the command
-takes priority.  Defaults to nil (dispatch always wins).
+Priority ordering for resolving dispatch vs. command conflicts.
+When a key matches a dispatch entry AND resolves to a bound command,
+the higher-priority action wins.
+
+Categories (ordered by priority, higher first):
+- `:dispatch` — direct key sequences (e.g. `C-x`, `C-b`)
+- `:modifier-prefix` — modifier prefixes (e.g. `M-`, `C-M-`)
+- `:toggle` — modifier toggles (`C-` dispatch, leader double-press)
+- `:command` — bound commands
 
 ```elisp
-(setq leader-prefer-command-over-dispatch t)  ; prefer commands
-(setq leader-prefer-command-over-dispatch nil) ; default: dispatch always wins
+(setq leader-dispatch-priority nil)
+;; Default: dispatch always wins.  Equivalent to:
+;; '(:dispatch :modifier-prefix :toggle)
 
-;; Example: dispatch has (?e . "C-M-"), and "C-c e" is a bound command
-;; With prefer-command=t:  SPC e → executes C-c e (command wins)
-;; With prefer-command=nil: SPC e → dispatch to C-M-, read next key
+(setq leader-dispatch-priority t)
+;; Commands always win.  Equivalent to:
+;; '(:command)
+
+(setq leader-dispatch-priority '(:modifier-prefix :dispatch :command :toggle))
+;; Modifier prefixes and direct dispatches take priority over commands,
+;; commands take priority over toggles (toggle only when no command bound).
+
+;; Example: dispatch has (?e . "M-"), and "C-c e" is a bound command
+;; With '(:modifier-prefix :dispatch :command :toggle):  SPC e → M-
+;; With '(:command :modifier-prefix):  SPC e → C-c e (command wins)
+;; With nil:  SPC e → M-
 ```
+
+Backward compatibility: `leader-prefer-command-over-dispatch` is an alias.
 
 ## Full Configuration Example
 
@@ -222,7 +240,7 @@ takes priority.  Defaults to nil (dispatch always wins).
 
 - `leader-keys` - List of leader key configurations
 - `leader-pass-through-predicates` - List of predicates for pass-through
-- `leader-prefer-command-over-dispatch` - Prefer bound commands over dispatch entries (default nil)
+- `leader-dispatch-priority` - Priority ordering for dispatch vs. command conflicts (default nil)
 
 ## Comparison with Other Leader Key Packages
 
