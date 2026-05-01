@@ -387,6 +387,26 @@ Custom ordering, e.g.:
                                  (const :tag "Primary command" :command)
                                  (const :tag "Fallback command" :command-fallback)))))
 
+(defvar leader--event-reader #'read-event
+  "Function to read an event, called with a prompt string.
+Override for testing.  Default is `read-event'.")
+
+(defvar leader--which-key-reader #'leader--modifier-which-key-read
+  "Function to read a key with which-key popup.
+Called with TARGET, MODIFIER and KEYS.  KEYS is the accumulated
+key sequence prefix.  Override for testing.")
+
+(defvar leader--continuation-p nil
+  "Non-nil when invoking modifier which-key from a sub-prefix continuation.")
+
+(defvar leader--key-lookup-fn nil
+  "If non-nil, a function (KEY-STRING) used instead of `key-binding'/`kbd'.
+When nil, uses the real Emacs key binding lookup.
+Set this for testing to provide mock bindings.")
+
+(defvar leader--active-keys nil
+  "List of leader key strings currently registered in `key-translation-map'.")
+
 (defun leader--dispatch-priority ()
   "Return canonical dispatch priority list.
 Backward-compatible: nil → (':dispatch :modifier-prefix :toggle),
@@ -435,26 +455,6 @@ for fallback match.  Compares positions in
     (cond ((null cmd-pos) nil)   ; command category not in list → never wins
           ((null cat-pos) t)     ; dispatch category not in list → command wins
           (t (< cmd-pos cat-pos))))) ; command earlier → command wins
-
-(defvar leader--event-reader #'read-event
-  "Function to read an event, called with a prompt string.
-Override for testing.  Default is `read-event'.")
-
-(defvar leader--which-key-reader #'leader--modifier-which-key-read
-  "Function to read a key with which-key popup.
-Called with TARGET, MODIFIER and KEYS.  KEYS is the accumulated
-key sequence prefix.  Override for testing.")
-
-(defvar leader--continuation-p nil
-  "Non-nil when invoking modifier which-key from a sub-prefix continuation.")
-
-(defvar leader--key-lookup-fn nil
-  "If non-nil, a function (KEY-STRING) used instead of `key-binding'/`kbd'.
-When nil, uses the real Emacs key binding lookup.
-Set this for testing to provide mock bindings.")
-
-(defvar leader--active-keys nil
-  "List of leader key strings currently registered in `key-translation-map'.")
 
 (defun leader--pass-through-p ()
   "Return non-nil if the leader key should pass through as a normal key.
@@ -802,33 +802,6 @@ Returns the event read."
           (setq char nil))))
     char))
 
-(defun leader--read-event-with-modifier-which-key (prompt modifier keys)
-  "Read an event showing custom which-key popup.
-PROMPT is the echo-area prompt, MODIFIER is the current modifier
-string and KEYS is the accumulated key sequence prefix.
-When MODIFIER is non-nil, shows a filtered popup with only the
-modified bindings.  When MODIFIER is nil, shows all bindings under
-KEYS using standard which-key display.  Supports C-h n/p paging."
-  (let ((which-key-inhibit t)
-        (popup-shown-cell (list nil)))
-    (which-key--hide-popup)
-    (when (leader--which-key-prepare keys modifier)
-      (when (and (eq leader--event-reader #'read-event)
-                 (sit-for which-key-idle-delay))
-        (leader--modifier-which-key-show-popup popup-shown-cell)))
-    (prog1
-        (leader--read-event-with-paging
-         (lambda ()
-           (let ((p prompt))
-             (when (and (car popup-shown-cell)
-                        which-key-use-C-h-commands
-                        which-key--pages-obj
-                        (> (which-key--pages-num-pages which-key--pages-obj) 1))
-               (setq p (concat p " [C-h n/p paging]")))
-             p))
-         popup-shown-cell)
-      (which-key--hide-popup))))
-
 (defun leader--modifier-which-key-show-popup (popup-shown-cell)
   "Ensure the which-key popup is visible.
 Sets POPUP-SHOWN-CELL to t and shows the popup if not already showing.
@@ -857,6 +830,33 @@ append a paging hint to the prompt."
                (> (which-key--pages-num-pages which-key--pages-obj) 1))
       (setq prompt (concat prompt " [C-h n/p paging]")))
     prompt))
+
+(defun leader--read-event-with-modifier-which-key (prompt modifier keys)
+  "Read an event showing custom which-key popup.
+PROMPT is the echo-area prompt, MODIFIER is the current modifier
+string and KEYS is the accumulated key sequence prefix.
+When MODIFIER is non-nil, shows a filtered popup with only the
+modified bindings.  When MODIFIER is nil, shows all bindings under
+KEYS using standard which-key display.  Supports C-h n/p paging."
+  (let ((which-key-inhibit t)
+        (popup-shown-cell (list nil)))
+    (which-key--hide-popup)
+    (when (leader--which-key-prepare keys modifier)
+      (when (and (eq leader--event-reader #'read-event)
+                 (sit-for which-key-idle-delay))
+        (leader--modifier-which-key-show-popup popup-shown-cell)))
+    (prog1
+        (leader--read-event-with-paging
+         (lambda ()
+           (let ((p prompt))
+             (when (and (car popup-shown-cell)
+                        which-key-use-C-h-commands
+                        which-key--pages-obj
+                        (> (which-key--pages-num-pages which-key--pages-obj) 1))
+               (setq p (concat p " [C-h n/p paging]")))
+             p))
+         popup-shown-cell)
+      (which-key--hide-popup))))
 
 (defun leader--modifier-which-key-read (target modifier keys)
   "Show which-key popup filtered by TARGET modifier prefix.
