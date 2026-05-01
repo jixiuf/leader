@@ -791,7 +791,12 @@ case a bound command takes priority over a matching dispatch entry."
       (let* ((modifier modifier-default)
              (fb-context fallback-modifier)
              (keys default-prefix)
-             (which-key-this-command-keys-function (lambda () (kbd keys)))
+             (which-key-this-command-keys-function
+              (lambda ()
+                (let ((k (kbd keys)))
+                  (if (and modifier (string-prefix-p "M" modifier))
+                      (vconcat k [?\e])
+                    k))))
              (need-read t)
              handled
              char raw-val parsed target mod-override
