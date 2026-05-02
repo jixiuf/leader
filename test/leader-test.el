@@ -792,7 +792,31 @@ SPC x h should produce C-x h, not dispatch to C-h prefix."
                        "C-c" nil
                        (list (cons ?g "M-"))
                        "C-" "C-")))
-          (should (equal result (kbd "C-c x M-f"))))))))
+           (should (equal result (kbd "C-c x M-f"))))))))
+
+(ert-deftest leader-test-continuation-modifier-prefix-empty-fallback ()
+  "Modifier prefix with zero completions falls back to plain key."
+  (let* ((prefix-map (make-sparse-keymap))
+         (reader-called nil))
+    (define-key prefix-map (kbd "g") 'next-line)
+    (leader-test--with-handler-env
+        `(("C-c x" . ,prefix-map)
+          ("C-c x g" . next-line))
+        '(?x ?g)
+      (let ((leader--which-key-reader
+             (lambda (_target _modifier _keys)
+               (setq reader-called t) ?g))
+            (leader-dispatch-priority nil))
+        (let ((result (leader--run-handler
+                       [? ]
+                       "C-c" nil
+                       (list (cons ?g "M-"))
+                       "C-" "C-")))
+          ;; 'x' dispatches to "C-c x" prefix, 'g' dispatches to "M-"
+          ;; modifier prefix, but no M-* bindings in prefix-map
+          ;; → fallback triggers, plain "C-c x g" is bound → use it
+          (should-not reader-called)
+          (should (equal result (kbd "C-c x g"))))))))
 
 (ert-deftest leader-test-continuation-dispatch-with-toggle ()
   "C- toggle dispatch works in continuation."
