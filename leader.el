@@ -891,6 +891,58 @@ Returns the character read."
 
 ;;; Handler
 
+(defun leader--dispatch-modifier-prefix (ctx char target mod-override fb-override)
+  "Handle modifier prefix dispatch (M-, C-M-, etc.).
+CTX is the `leader-ctx', CHAR the pressed key, TARGET the dispatch
+target string, MOD-OVERRIDE and FB-OVERRIDE the dispatch entry
+overrides.  Returns non-nil when resolved to a complete key sequence."
+  (let* ((parts (split-string target " "))
+         (prefix (when (cdr parts)
+                   (string-join (butlast parts) " ")))
+         (done nil))
+    (when prefix
+      (setf (leader-ctx-keys ctx)
+            (if (and (not (leader-ctx-continuation-p ctx))
+                     (string= (leader-ctx-keys ctx)
+                              (leader-ctx-default-prefix ctx)))
+                prefix
+              (concat (leader-ctx-keys ctx) " " prefix))))
+    (setq leader--continuation-p
+          (or (leader-ctx-continuation-p ctx)
+              leader--continuation-p))
+    (when (and (leader-ctx-continuation-p ctx)
+               (not (leader--modifier-which-key-prepare
+                     target (leader-ctx-keys ctx))))
+      (setf (leader-ctx-keys ctx)
+            (leader--apply-modifier
+             (leader-ctx-keys ctx)
+             (leader-ctx-modifier ctx)
+             (leader-ctx-fb-context ctx)
+             char)
+            (leader-ctx-modifier ctx) (leader-ctx-modifier-default ctx)
+            (leader-ctx-fb-context ctx) (leader-ctx-fallback-modifier ctx))
+      (setq done t))
+    (unless done
+      (let ((char2 (funcall leader--which-key-reader
+                            target
+                            (leader-ctx-modifier ctx)
+                            (leader-ctx-keys ctx))))
+        (setf (leader-ctx-keys ctx)
+              (if (leader-ctx-continuation-p ctx)
+                  (concat (leader-ctx-keys ctx) " "
+                          target (single-key-description char2))
+                (concat target (single-key-description char2)))))
+      (setf (leader-ctx-modifier ctx)
+            (if (eq mod-override 'default)
+                (leader-ctx-modifier-default ctx)
+              mod-override)
+            (leader-ctx-fb-context ctx)
+            (if (eq fb-override 'default)
+                (leader-ctx-fallback-modifier ctx)
+              fb-override))
+      (setq done t))
+    done))
+
 (defun leader--process-dispatch (ctx char)
   "Process CHAR in the context of CTX, mutating CTX in place.
 Returns non-nil when the dispatch resolved to a complete key sequence.
@@ -942,52 +994,10 @@ CTX is a `leader-ctx' struct."
                         (or (leader-ctx-fb-context ctx) "C-"))
                     (leader-ctx-toggle-target ctx))))))
        ;; Modifier prefix dispatch (M-, C-M-, etc.)
-       ((and target (string-suffix-p "-" target))
-        (let* ((parts (split-string target " "))
-               (prefix (when (cdr parts)
-                         (string-join (butlast parts) " "))))
-          (when prefix
-            (setf (leader-ctx-keys ctx)
-                  (if (and (not (leader-ctx-continuation-p ctx))
-                           (string= (leader-ctx-keys ctx)
-                                    (leader-ctx-default-prefix ctx)))
-                      prefix
-                    (concat (leader-ctx-keys ctx) " " prefix))))
-           (setq leader--continuation-p
-                 (or (leader-ctx-continuation-p ctx)
-                     leader--continuation-p))
-           (when (and (leader-ctx-continuation-p ctx)
-                      (not (leader--modifier-which-key-prepare
-                            target (leader-ctx-keys ctx))))
-             (setf (leader-ctx-keys ctx)
-                   (leader--apply-modifier
-                    (leader-ctx-keys ctx)
-                    (leader-ctx-modifier ctx)
-                    (leader-ctx-fb-context ctx)
-                    char)
-                   (leader-ctx-modifier ctx) (leader-ctx-modifier-default ctx)
-                   (leader-ctx-fb-context ctx) (leader-ctx-fallback-modifier ctx))
-             (setq done t))
-           (unless done
-             (let ((char2 (funcall leader--which-key-reader
-                                   target
-                                   (leader-ctx-modifier ctx)
-                                   (leader-ctx-keys ctx))))
-               (setf (leader-ctx-keys ctx)
-                     (if (leader-ctx-continuation-p ctx)
-                         (concat (leader-ctx-keys ctx) " "
-                                 target (single-key-description char2))
-                       (concat target (single-key-description char2)))))
-             (setf (leader-ctx-modifier ctx)
-                   (if (eq mod-override 'default)
-                       (leader-ctx-modifier-default ctx)
-                     mod-override)
-                   (leader-ctx-fb-context ctx)
-                   (if (eq fb-override 'default)
-                       (leader-ctx-fallback-modifier ctx)
-                     fb-override))
-             (setq done t))))
-       ;; Direct match (C-x, C-h, etc.)
+        ((and target (string-suffix-p "-" target))
+         (setq done (leader--dispatch-modifier-prefix
+                     ctx char target mod-override fb-override)))
+        ;; Direct match (C-x, C-h, etc.)
        ((and target (not (string-suffix-p "-" target)))
         (setf (leader-ctx-keys ctx)
               (if (and (not (leader-ctx-continuation-p ctx))
