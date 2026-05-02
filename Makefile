@@ -1,7 +1,7 @@
 # -*- coding:utf-8 -*-
 
 EMACS ?= emacs
-ELC := leader.elc
+ELC := keypad.elc
 
 .PHONY: all build test test-all lint byte-compile clean
 all: byte-compile lint test
@@ -15,8 +15,8 @@ byte-compile: $(ELC)
 test:
 	emacs --batch -Q --eval "(package-initialize)" -L . -L test \
 	  -l ert \
-	  -l test/leader-test.el \
-	  -f leader-test-run
+	  -l test/keypad-test.el \
+	  -f keypad-test-run
 
 
 lint: byte-compile package-lint checkdoc
@@ -25,7 +25,7 @@ package-lint:
 		--eval "(package-initialize)" \
 		--eval "(require 'package-lint)" \
 		-f package-lint-batch-and-exit \
-		leader.el
+		keypad.el
 
 checkdoc:
 	@$(EMACS) --batch -Q \
@@ -39,7 +39,7 @@ checkdoc:
 		              (checkdoc-proper-noun-list nil) \
 		              (checkdoc-verb-check-experimental-flag nil) \
 		              (ok t)) \
-		  (dolist (f '(\"leader.el\")) \
+		  (dolist (f '(\"keypad.el\")) \
 		    (ignore-errors (kill-buffer \"*Warnings*\")) \
 		    (let ((inhibit-message t)) \
 		      (checkdoc-file f)) \

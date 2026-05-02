@@ -1,4 +1,4 @@
-;;; leader-which-key.el --- which-key integration for leader -*- lexical-binding: t; -*-
+;;; keypad-which-key.el --- which-key integration for leader -*- lexical-binding: t; -*-
 
 ;; Author: jixiuf
 ;; Keywords: convenience
@@ -7,9 +7,9 @@
 ;;; Commentary:
 ;;
 ;; Optional module that adds which-key popup support to leader.
-;; Load this after both `leader' and `which-key':
+;; Load this after both `keypad' and `which-key':
 ;;
-;;;;   (require 'leader-which-key)
+;;;;   (require 'keypad-which-key)
 ;;
 ;; Provides visual key binding hints during leader key sequences,
 ;; including modifier-prefix contexts (M-, C-M- dispatch targets).
@@ -18,30 +18,30 @@
 
 (require 'which-key)
 
-(declare-function leader--collect-modifier-bindings "leader")
-(declare-function leader--binding-sort "leader")
-(declare-function leader--prompt "leader")
+(declare-function keypad--collect-modifier-bindings "keypad")
+(declare-function keypad--binding-sort "keypad")
+(declare-function keypad--prompt "keypad")
 
-(defvar leader--event-reader)
-(defvar leader--which-key-show-fn)
-(defvar leader--which-key-modifier-read-fn)
-(defvar leader--which-key-read-event-fn)
+(defvar keypad--event-reader)
+(defvar keypad--which-key-show-fn)
+(defvar keypad--which-key-modifier-read-fn)
+(defvar keypad--which-key-read-event-fn)
 
-(defcustom leader-which-key-modifier-max-bindings 150
+(defcustom keypad-which-key-modifier-max-bindings 150
   "Maximum number of bindings to show in modifier-prefix which-key popups.
 Set to nil for unlimited."
   :type '(choice (const :tag "Unlimited" nil) integer)
-  :group 'leader)
+  :group 'keypad)
 
-(defun leader-wk--modifier-bindings (target)
-  "Call `leader--collect-modifier-bindings' with display limit applied."
-  (let ((all (leader--collect-modifier-bindings target)))
-    (if (and leader-which-key-modifier-max-bindings
-             (> (length all) leader-which-key-modifier-max-bindings))
-        (cl-subseq all 0 leader-which-key-modifier-max-bindings)
+(defun keypad-wk--modifier-bindings (target)
+  "Call `keypad--collect-modifier-bindings' with display limit applied."
+  (let ((all (keypad--collect-modifier-bindings target)))
+    (if (and keypad-which-key-modifier-max-bindings
+             (> (length all) keypad-which-key-modifier-max-bindings))
+        (cl-subseq all 0 keypad-which-key-modifier-max-bindings)
       all)))
 
-(defun leader-wk--collect-prefix-bindings (keys modifier)
+(defun keypad-wk--collect-prefix-bindings (keys modifier)
   "Collect bindings for prefix KEYS with MODIFIER bias in sorting.
 MODIFIER non-nil sorts modified keys first; nil sorts plain keys first."
   (let* ((map (key-binding (kbd keys)))
@@ -92,14 +92,14 @@ MODIFIER non-nil sorts modified keys first; nil sorts plain keys first."
                                 (substring (car b) prefix-len))))
              (modified (cl-remove-if-not mod-match-p bindings))
              (plain (cl-remove-if mod-match-p bindings))
-             (sorted-mod (sort modified #'leader--binding-sort))
-             (sorted-plain (sort plain #'leader--binding-sort))
+             (sorted-mod (sort modified #'keypad--binding-sort))
+             (sorted-plain (sort plain #'keypad--binding-sort))
              (sorted (if modifier
                          (append sorted-mod sorted-plain)
                        (append sorted-plain sorted-mod))))
         sorted))))
 
-(defun leader-wk--next-page (delta)
+(defun keypad-wk--next-page (delta)
   "Advance which-key page by DELTA, re-render."
   (when (and which-key--pages-obj
              (> (which-key--pages-num-pages which-key--pages-obj) 1))
@@ -108,19 +108,19 @@ MODIFIER non-nil sorts modified keys first; nil sorts plain keys first."
     (let ((which-key--automatic-display t))
       (which-key--show-page))))
 
-(defun leader-wk--show-popup (&optional force)
+(defun keypad-wk--show-popup (&optional force)
   "Show which-key popup if not already visible.  FORCE forces refresh."
   (when (and which-key--pages-obj
              (or force (not (which-key--popup-showing-p))))
     (let ((which-key--automatic-display t))
       (which-key--show-page))))
 
-(defun leader-wk--hide ()
+(defun keypad-wk--hide ()
   "Hide our which-key popup."
   (ignore-errors (which-key--hide-popup))
   (setq which-key--pages-obj nil))
 
-(defun leader-wk--page-hint ()
+(defun keypad-wk--page-hint ()
   "Return echo-area paging hint string."
   (when which-key--pages-obj
     (let* ((n (which-key--pages-num-pages which-key--pages-obj))
@@ -129,52 +129,52 @@ MODIFIER non-nil sorts modified keys first; nil sorts plain keys first."
         (format "  page %d/%d  %s n/p"
                 page n (key-description (vector help-char)))))))
 
-(defun leader-wk--read-event (prompt-fn)
+(defun keypad-wk--read-event (prompt-fn)
   "Read an event with paging support."
   (let ((paging-key (and which-key-paging-key (kbd which-key-paging-key)))
         char)
     (while (not char)
-      (setq char (funcall leader--event-reader
+      (setq char (funcall keypad--event-reader
                           (concat (funcall prompt-fn)
-                                  (or (leader-wk--page-hint) ""))))
+                                  (or (keypad-wk--page-hint) ""))))
       (if (and which-key-use-C-h-commands
                (numberp char) (= char help-char)
                which-key--pages-obj
                (> (which-key--pages-num-pages which-key--pages-obj) 1))
-          (let ((ch (funcall leader--event-reader (leader-wk--page-hint))))
-            (cond ((eq ch ?n) (leader-wk--next-page 1))
-                  ((eq ch ?p) (leader-wk--next-page -1)))
+          (let ((ch (funcall keypad--event-reader (keypad-wk--page-hint))))
+            (cond ((eq ch ?n) (keypad-wk--next-page 1))
+                  ((eq ch ?p) (keypad-wk--next-page -1)))
             (setq char nil))
         (when (and paging-key (equal (vector char) paging-key))
-          (leader-wk--show-popup t)
-          (leader-wk--next-page 1)
+          (keypad-wk--show-popup t)
+          (keypad-wk--next-page 1)
           (setq char nil))))
     char))
 
-(defun leader--which-key-show (keys modifier)
+(defun keypad--which-key-show (keys modifier)
   "Show which-key popup for KEYS with MODIFIER bias.
-Installed as `leader--which-key-show-fn'."
+Installed as `keypad--which-key-show-fn'."
   (let* ((modifier-only (and (or (null keys) (string-empty-p keys))
                              modifier))
          (bindings (if modifier-only
-                       (leader-wk--modifier-bindings modifier)
-                     (leader-wk--collect-prefix-bindings keys modifier)))
+                       (keypad-wk--modifier-bindings modifier)
+                     (keypad-wk--collect-prefix-bindings keys modifier)))
          (pages (and bindings (which-key--format-and-replace bindings)))
          (prefix (if modifier-only modifier keys)))
-    (message "%s" (leader--prompt keys modifier))
+    (message "%s" (keypad--prompt keys modifier))
     (when pages
       (setq which-key--pages-obj
             (which-key--create-pages pages nil prefix))
       (when (sit-for which-key-idle-delay)
-        (leader-wk--show-popup t)))))
+        (keypad-wk--show-popup t)))))
 
-(defun leader--which-key-modifier-read (target prefix)
+(defun keypad--which-key-modifier-read (target prefix)
   "Read a key with modifier-prefix which-key for TARGET.
-Installed as `leader--which-key-modifier-read-fn'."
-  (leader-wk--hide)
+Installed as `keypad--which-key-modifier-read-fn'."
+  (keypad-wk--hide)
   (let* ((continuation-p (and prefix (not (string-empty-p prefix))))
          (page-prefix (if continuation-p (concat prefix " " target) target))
-         (raw (leader-wk--modifier-bindings target))
+         (raw (keypad-wk--modifier-bindings target))
          (bindings
           (if (not continuation-p)
               raw
@@ -201,32 +201,32 @@ Installed as `leader--which-key-modifier-read-fn'."
           (setq which-key--pages-obj
                 (which-key--create-pages pages nil page-prefix))
           (sit-for which-key-idle-delay)
-          (leader-wk--show-popup t))))
+          (keypad-wk--show-popup t))))
     (unwind-protect
-        (leader-wk--read-event
+        (keypad-wk--read-event
          (lambda ()
            (concat (if continuation-p (concat prefix " ") "")
                    target "-")))
-      (leader-wk--hide))))
+      (keypad-wk--hide))))
 
-(defun leader-which-key-setup ()
+(defun keypad-which-key-setup ()
   "Set up which-key integration hooks into leader."
-  (setq leader--which-key-show-fn #'leader--which-key-show)
-  (setq leader--which-key-modifier-read-fn #'leader--which-key-modifier-read)
-  (setq leader--which-key-read-event-fn #'leader-wk--read-event))
+  (setq keypad--which-key-show-fn #'keypad--which-key-show)
+  (setq keypad--which-key-modifier-read-fn #'keypad--which-key-modifier-read)
+  (setq keypad--which-key-read-event-fn #'keypad-wk--read-event))
 
-(defun leader-which-key-teardown ()
+(defun keypad-which-key-teardown ()
   "Remove which-key integration hooks."
-  (setq leader--which-key-show-fn nil
-        leader--which-key-modifier-read-fn nil
-        leader--which-key-read-event-fn nil))
+  (setq keypad--which-key-show-fn nil
+        keypad--which-key-modifier-read-fn nil
+        keypad--which-key-read-event-fn nil))
 
-(with-eval-after-load 'leader
-  (leader-which-key-setup))
+(with-eval-after-load 'keypad
+  (keypad-which-key-setup))
 
-(provide 'leader-which-key)
+(provide 'keypad-which-key)
 
 ;; Local Variables:
 ;; coding: utf-8
 ;; End:
-;;; leader-which-key.el ends here
+;;; keypad-which-key.el ends here

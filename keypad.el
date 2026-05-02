@@ -1,4 +1,4 @@
-;;; leader.el --- Leader key configuration -*- lexical-binding: t; -*-
+;;; keypad.el --- Leader key configuration -*- lexical-binding: t; -*-
 
 ;; Author: jixiuf
 ;; Keywords: convenience
@@ -23,7 +23,7 @@
 
 ;;; Commentary:
 
-;; leader.el — a modal leader-key package for Emacs.
+;; keypad.el — a modal leader-key package for Emacs.
 ;;
 ;; It intercepts one or more "leader keys" via `key-translation-map' and
 ;; translates subsequent keystrokes into standard Emacs key sequences.
@@ -32,14 +32,14 @@
 ;;  Quick start
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;;   (require 'leader)
-;;   (leader-mode 1)
+;;   (require 'keypad)
+;;   (keypad-mode 1)
 ;;
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;  Configuration (keyword format)
 ;; ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ;;
-;;   (setq leader-keys
+;;   (setq keypad-keys
 ;;    '((:key "<SPC>" :prefix "C-c" :modifier "C-" :fallback "C-"
 ;;       :dispatch ((?x . (:prefix "C-x" :modifier "C-" :fallback "C-"))
 ;;                  (?h . (:prefix "C-h" :modifier nil  :fallback "C-"))
@@ -59,22 +59,22 @@
 
 (require 'cl-lib)
 
-(defgroup leader nil
+(defgroup keypad nil
   "Leader key configuration."
   :group 'convenience)
 
-(defcustom leader-keys nil
+(defcustom keypad-keys nil
   "List of leader key configurations.
 Each element is a plist — see file commentary for keys."
   :type '(repeat sexp)
-  :group 'leader
+  :group 'keypad
   :set (lambda (sym val)
          (set-default sym val)
-         (when (and (bound-and-true-p leader-mode)
-                    (fboundp 'leader--normalize-config))
-           (leader--install))))
+         (when (and (bound-and-true-p keypad-mode)
+                    (fboundp 'keypad--normalize-config))
+           (keypad--install))))
 
-(defcustom leader-pass-through-predicates '(minibufferp isearch-mode)
+(defcustom keypad-pass-through-predicates '(minibufferp isearch-mode)
   "Predicates determining when the leader key passes through as is.
 Each element can be:
 - A function (or lambda): called with no arguments, pass-through if non-nil.
@@ -84,9 +84,9 @@ Each element can be:
   3. If fboundp and NOT commandp → funcall.
   Commands are never called (avoids accidentally toggling modes)."
   :type '(repeat (choice function symbol))
-  :group 'leader)
+  :group 'keypad)
 
-(defcustom leader-dispatch-priority nil
+(defcustom keypad-dispatch-priority nil
   "How to resolve dispatch vs. bound-command conflicts.
 nil      — dispatch entries always win.
 t        — bound commands always win (including fallback matches).
@@ -94,9 +94,9 @@ t        — bound commands always win (including fallback matches).
   :type '(choice (const :tag "Dispatch wins" nil)
                  (const :tag "Command wins" t)
                  (const :tag "Command wins (primary only)" :primary))
-  :group 'leader)
+  :group 'keypad)
 
-(defcustom leader-toggle-priority nil
+(defcustom keypad-toggle-priority nil
   "How to resolve toggle vs. bound-command conflicts.
 nil      — toggle always wins (default).
 t        — bound command wins over toggle.
@@ -104,38 +104,38 @@ t        — bound command wins over toggle.
   :type '(choice (const :tag "Toggle wins" nil)
                  (const :tag "Command wins" t)
                  (const :tag "Command wins (primary only)" :primary))
-  :group 'leader)
+  :group 'keypad)
 
 
 ;;; Internal state
 
-(defvar leader--event-reader #'read-event
+(defvar keypad--event-reader #'read-event
   "Function to read events.  Override for testing.")
 
-(defvar leader--key-lookup-fn nil
+(defvar keypad--key-lookup-fn nil
   "If non-nil, a function (KEY-STRING) used instead of `key-binding'/`kbd'.")
 
-(defvar leader--which-key-show-fn nil
-  "Hook set by `leader-which-key' to show which-key popup for a prefix.")
+(defvar keypad--which-key-show-fn nil
+  "Hook set by `keypad-which-key' to show which-key popup for a prefix.")
 
-(defvar leader--which-key-modifier-read-fn nil
-  "Hook set by `leader-which-key' to read a key with modifier-filtered popup.")
+(defvar keypad--which-key-modifier-read-fn nil
+  "Hook set by `keypad-which-key' to read a key with modifier-filtered popup.")
 
-(defvar leader--which-key-read-event-fn nil
-  "Hook set by `leader-which-key' to read an event with paging support.
+(defvar keypad--which-key-read-event-fn nil
+  "Hook set by `keypad-which-key' to read an event with paging support.
 Called as (PROMPT-FN) where PROMPT-FN returns the echo-area prompt.
 Should return the event character.")
 
-(defvar leader--normalized-config nil
+(defvar keypad--normalized-config nil
   "Cached normalized configuration.")
 
-(defvar leader--installed nil
+(defvar keypad--installed nil
   "Non-nil when leader key handlers are installed in `key-translation-map'.")
 
 
 ;;; Data structures
 
-(cl-defstruct leader-context
+(cl-defstruct keypad-context
   "Normalized context for a leader key or dispatch entry.
 All fields are fully resolved at config-normalize time; no runtime
 default-filling or conditional logic is needed."
@@ -145,13 +145,13 @@ default-filling or conditional logic is needed."
   toggle-target                 ; "C-", nil
   dispatch-alist                ; ((char . context) ...)  ; root-level
   local-dispatch-alist          ; ((char . context) ...) ; continuations only
-  leader-char                   ; integer: leader key event
+  keypad-char                   ; integer: leader key event
   pass-through-predicates)      ; nil=use global, list=per-key override
 
 
 ;;; Normalization
 
-(defun leader--infer-toggle (modifier fallback)
+(defun keypad--infer-toggle (modifier fallback)
   "Infer toggle target from MODIFIER and FALLBACK.
 If FALLBACK differs from MODIFIER, toggle to FALLBACK.
 Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
@@ -159,7 +159,7 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
         (modifier nil)
         (t "C-")))
 
-(defun leader--normalize-prefix-plist (plist)
+(defun keypad--normalize-prefix-plist (plist)
   "Normalize a prefix PLIST into:
 \(PREFIX MODIFIER FALLBACK TOGGLE LOCAL-DISPATCH)."
   (let* ((prefix (plist-get plist :prefix))
@@ -181,33 +181,33 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
           modifier
           (if has-fb fallback
             (if (null prefix) nil modifier))
-          (or toggle (leader--infer-toggle modifier fallback))
+          (or toggle (keypad--infer-toggle modifier fallback))
           local-dispatch)))
 
-(defun leader--normalize-dispatch (alist)
-  "Normalize dispatch ALIST into ((CHAR . leader-context) ...)."
+(defun keypad--normalize-dispatch (alist)
+  "Normalize dispatch ALIST into ((CHAR . keypad-context) ...)."
   (mapcar
    (lambda (entry)
      (let ((char (car entry))
            (val (cdr entry)))
        (cond
         ((eq val :toggle)
-         (cons char (make-leader-context
+         (cons char (make-keypad-context
                      :prefix nil :modifier nil :fallback nil
                      :toggle-target "C-"
                      :dispatch-alist nil
                      :local-dispatch-alist nil
                      :pass-through-predicates nil)))
         ((and (consp val) (keywordp (car val)))
-         (let* ((norm (leader--normalize-prefix-plist val))
+         (let* ((norm (keypad--normalize-prefix-plist val))
                 (prefix (nth 0 norm))
                 (modifier (nth 1 norm))
                 (fallback (nth 2 norm))
                 (toggle (nth 3 norm))
                 (local-dispatch
                  (let ((sub (nth 4 norm)))
-                   (when sub (leader--normalize-dispatch sub)))))
-           (cons char (make-leader-context
+                   (when sub (keypad--normalize-dispatch sub)))))
+           (cons char (make-keypad-context
                        :prefix prefix :modifier modifier
                        :fallback fallback :toggle-target toggle
                        :dispatch-alist nil
@@ -217,9 +217,9 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
         (t (error "Invalid dispatch value: %S" val)))))
    alist))
 
-(defun leader--normalize-config ()
-  "Normalize `leader-keys' into a list of `leader-context' structs."
-  (setq leader--normalized-config
+(defun keypad--normalize-config ()
+  "Normalize `keypad-keys' into a list of `keypad-context' structs."
+  (setq keypad--normalized-config
         (mapcar
          (lambda (entry)
            (let* ((key-str (plist-get entry :key))
@@ -228,39 +228,39 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
                          :modifier (plist-get entry :modifier)
                          :fallback (plist-get entry :fallback)
                          :toggle (plist-get entry :toggle)))
-                  (norm (leader--normalize-prefix-plist prefix-plist))
+                  (norm (keypad--normalize-prefix-plist prefix-plist))
                   (prefix (nth 0 norm))
                   (modifier (nth 1 norm))
                   (fallback (nth 2 norm))
                   (toggle (nth 3 norm))
-                  (disp (leader--normalize-dispatch
+                  (disp (keypad--normalize-dispatch
                          (plist-get entry :dispatch))))
-             (make-leader-context
+             (make-keypad-context
               :prefix prefix
               :modifier modifier
               :fallback fallback
               :toggle-target toggle
               :dispatch-alist disp
               :local-dispatch-alist nil
-              :leader-char (aref (kbd key-str) 0)
+              :keypad-char (aref (kbd key-str) 0)
               :pass-through-predicates
               (plist-get entry :pass-through-predicates))))
-         leader-keys)))
+         keypad-keys)))
 
 
 ;;; Key building
 
-(defun leader--empty-p (s)
+(defun keypad--empty-p (s)
   "Return non-nil if S is nil or the empty string."
   (or (null s) (string-empty-p s)))
 
-(defun leader--lookup-key (keystr)
-  "Look up KEYSTR.  Uses `leader--key-lookup-fn' if set."
-  (if leader--key-lookup-fn
-      (funcall leader--key-lookup-fn keystr)
+(defun keypad--lookup-key (keystr)
+  "Look up KEYSTR.  Uses `keypad--key-lookup-fn' if set."
+  (if keypad--key-lookup-fn
+      (funcall keypad--key-lookup-fn keystr)
     (key-binding (kbd keystr))))
 
-(defun leader--resolve-key (prefix modifier fallback char)
+(defun keypad--resolve-key (prefix modifier fallback char)
   "Resolve CHAR to (KEY-STRING . FALLBACK-P).
 Uses PREFIX, MODIFIER, and FALLBACK.  Resolution order:
 - modifier non-nil: try MODIFIER+CHAR, else plain CHAR.
@@ -269,14 +269,14 @@ Uses PREFIX, MODIFIER, and FALLBACK.  Resolution order:
          (plain-key (concat prefix " " desc))
          (mod-key (when modifier (concat prefix " " modifier desc)))
          (fb-key (when fallback (concat prefix " " fallback desc))))
-    (cond ((and modifier mod-key (leader--lookup-key mod-key))
+    (cond ((and modifier mod-key (keypad--lookup-key mod-key))
            (cons mod-key nil))
           (modifier (cons plain-key t))
-          ((leader--lookup-key plain-key) (cons plain-key nil))
-          ((and fb-key (leader--lookup-key fb-key)) (cons fb-key t))
+          ((keypad--lookup-key plain-key) (cons plain-key nil))
+          ((and fb-key (keypad--lookup-key fb-key)) (cons fb-key t))
           (t (cons plain-key t)))))
 
-(defun leader--binding-is-prefix-keymap-p (binding)
+(defun keypad--binding-is-prefix-keymap-p (binding)
   "Non-nil if BINDING is a prefix keymap.
 Handles keymap objects and symbol variables holding keymaps."
   (or (keymapp binding)
@@ -284,7 +284,7 @@ Handles keymap objects and symbol variables holding keymaps."
             (boundp binding)
             (keymapp (symbol-value binding)))))
 
-(defun leader--binding-sort (a b)
+(defun keypad--binding-sort (a b)
   "Sort A and B: plain before angle-bracket, shorter first, alphabetical."
   (let* ((ka (car a)) (kb (car b))
          (ba (if (string-match-p "[<>]" ka) 1 0))
@@ -294,7 +294,7 @@ Handles keymap objects and symbol variables holding keymaps."
         (and (= ba bb) (= (string-width ka) (string-width kb))
              (string< ka kb)))))
 
-(defun leader--collect-modifier-bindings (target)
+(defun keypad--collect-modifier-bindings (target)
   "Collect bindings from all active keymaps matching TARGET modifier prefix."
   (let ((bindings nil)
         (seen (make-hash-table :test 'equal)))
@@ -338,9 +338,9 @@ Handles keymap objects and symbol variables holding keymaps."
              (let ((desc (key-description (vector ev))))
                (push-binding desc def)))))
          map)))
-    (sort (nreverse bindings) #'leader--binding-sort)))
+    (sort (nreverse bindings) #'keypad--binding-sort)))
 
-(defun leader--modifier-has-completions-p (prefix target)
+(defun keypad--modifier-has-completions-p (prefix target)
   "Non-nil if TARGET has modifier-prefix completions under PREFIX.
 Iterates active keymaps directly and returns on first match."
   (catch 'found
@@ -350,7 +350,7 @@ Iterates active keymaps directly and returns on first match."
          (when (and (not (eq def 'undefined)) (not (eq ev 'which-key)))
            (let ((desc (key-description (vector ev))))
              (when (string-prefix-p target desc)
-               (when (leader--lookup-key (concat prefix " " desc))
+               (when (keypad--lookup-key (concat prefix " " desc))
                  (throw 'found t))))
            (when (eq ev 27)
              (when (keymapp def)
@@ -361,7 +361,7 @@ Iterates active keymaps directly and returns on first match."
                     (let* ((meta-ev (event-apply-modifier sub-ev 'meta 27 "M-"))
                            (desc (key-description (vector meta-ev))))
                       (when (string-prefix-p target desc)
-                        (when (leader--lookup-key (concat prefix " " desc))
+                        (when (keypad--lookup-key (concat prefix " " desc))
                           (throw 'found t)))))
                    ((consp sub-ev)
                      (cl-loop for i from (car sub-ev) to (cdr sub-ev)
@@ -369,15 +369,15 @@ Iterates active keymaps directly and returns on first match."
                                          i 'meta 27 "M-")
                               for desc = (key-description (vector mev))
                               when (string-prefix-p target desc)
-                             when (leader--lookup-key (concat prefix " " desc))
+                             when (keypad--lookup-key (concat prefix " " desc))
                              do (throw 'found t)))))
                 def)))))
        map))
     nil))
 
-(defun leader--pass-through-p (&optional predicates)
+(defun keypad--pass-through-p (&optional predicates)
   "Return non-nil if the leader key should pass through.
-Uses PREDICATES if non-nil, otherwise `leader-pass-through-predicates'."
+Uses PREDICATES if non-nil, otherwise `keypad-pass-through-predicates'."
   (cl-some
    (lambda (pred)
      (cond
@@ -388,12 +388,12 @@ Uses PREDICATES if non-nil, otherwise `leader-pass-through-predicates'."
              (t nil)))
       ((functionp pred) (funcall pred))
       (t nil)))
-   (or predicates leader-pass-through-predicates)))
+   (or predicates keypad-pass-through-predicates)))
 
 
 ;;; Prompt
 
-(defun leader--prompt (keys modifier)
+(defun keypad--prompt (keys modifier)
   "Build echo-area prompt string from KEYS and MODIFIER."
   (let ((keys (if (or (null keys) (and (stringp keys) (string-empty-p keys)))
                   ""
@@ -402,7 +402,7 @@ Uses PREDICATES if non-nil, otherwise `leader-pass-through-predicates'."
         (format "%s [%s]-" keys modifier)
       (format "%s -" keys))))
 
-(defun leader--modifier-prefix-prompt (target prefix)
+(defun keypad--modifier-prefix-prompt (target prefix)
   "Build prompt for TARGET modifier-prefix reading with PREFIX."
   (concat (if (and prefix (not (string-empty-p prefix)))
               (concat prefix " ") "")
@@ -411,66 +411,66 @@ Uses PREDICATES if non-nil, otherwise `leader-pass-through-predicates'."
 
 ;;; Event reading
 
-(defun leader--read-event-with-which-key (prompt modifier prefix)
+(defun keypad--read-event-with-which-key (prompt modifier prefix)
   "Read an event with PROMPT, optionally showing which-key popup.
-When `leader--which-key-read-event-fn' is set, delegates event
+When `keypad--which-key-read-event-fn' is set, delegates event
 reading to it for paging support (C-h n/p). MODIFIER and PREFIX are
 passed to the which-key show function."
-  (when leader--which-key-show-fn
-    (funcall leader--which-key-show-fn prefix modifier))
-  (if leader--which-key-read-event-fn
-      (funcall leader--which-key-read-event-fn (lambda () prompt))
-    (funcall leader--event-reader prompt)))
+  (when keypad--which-key-show-fn
+    (funcall keypad--which-key-show-fn prefix modifier))
+  (if keypad--which-key-read-event-fn
+      (funcall keypad--which-key-read-event-fn (lambda () prompt))
+    (funcall keypad--event-reader prompt)))
 
-(defun leader--read-modifier-event (target prefix)
+(defun keypad--read-modifier-event (target prefix)
   "Read a second key after a TARGET modifier-prefix dispatch with PREFIX."
   ;; Temporarily override which-key's command-keys tracking during
   ;; modifier-prefix read so it doesn't show the old C-c bindings.
   (with-no-warnings
     (let ((which-key-this-command-keys-function (lambda () [])))
-      (if leader--which-key-modifier-read-fn
-          (funcall leader--which-key-modifier-read-fn target prefix)
+      (if keypad--which-key-modifier-read-fn
+          (funcall keypad--which-key-modifier-read-fn target prefix)
         (progn
-          (message "%s" (leader--modifier-prefix-prompt target prefix))
-          (funcall leader--event-reader
-                   (leader--modifier-prefix-prompt target prefix)))))))
+          (message "%s" (keypad--modifier-prefix-prompt target prefix))
+          (funcall keypad--event-reader
+                   (keypad--modifier-prefix-prompt target prefix)))))))
 
 
 ;;; Core handler
 
-(defun leader--command-wins-p (priority fallback-p)
+(defun keypad--command-wins-p (priority fallback-p)
   "Return non-nil if a bound command should win under PRIORITY with FALLBACK-P."
   (cond ((null priority) nil)
         ((eq priority :primary) (not fallback-p))
         (t t)))
 
-(defun leader--process-char (ctx char prefix-keys continuation-p)
+(defun keypad--process-char (ctx char prefix-keys continuation-p)
   "Process CHAR in CTX, mutating CTX and PREFIX-KEYS in place.
-CTX is a `leader-context', PREFIX-KEYS is (ACCUMULATED . MODIFIER).
+CTX is a `keypad-context', PREFIX-KEYS is (ACCUMULATED . MODIFIER).
 CONTINUATION-P is non-nil inside a prefix keymap continuation.
 Returns :done, :continue, or nil (toggle, re-read)."
-  (cl-block leader--process-char
+  (cl-block keypad--process-char
     (let* ((acc (car prefix-keys))
            (current-modifier (cdr prefix-keys))
            ;; In continuation prefer local dispatch, fall back to root
            (alist (if continuation-p
-                      (or (leader-context-local-dispatch-alist ctx)
-                          (leader-context-dispatch-alist ctx))
-                    (leader-context-dispatch-alist ctx)))
+                      (or (keypad-context-local-dispatch-alist ctx)
+                          (keypad-context-dispatch-alist ctx))
+                    (keypad-context-dispatch-alist ctx)))
            (dispatch (assq char alist))
            (dispatch-ctx (cdr dispatch))
            (is-toggle-dispatch
             (and dispatch
-                 (leader--empty-p (leader-context-prefix dispatch-ctx))
-                 (null (leader-context-modifier dispatch-ctx))
-                 (leader-context-toggle-target dispatch-ctx)))
+                 (keypad--empty-p (keypad-context-prefix dispatch-ctx))
+                 (null (keypad-context-modifier dispatch-ctx))
+                 (keypad-context-toggle-target dispatch-ctx)))
            (is-direct-dispatch
             (and dispatch (not is-toggle-dispatch)
-                 (not (leader--empty-p (leader-context-prefix dispatch-ctx)))))
+                 (not (keypad--empty-p (keypad-context-prefix dispatch-ctx)))))
            (is-modifier-dispatch
             (and dispatch (not is-toggle-dispatch) (not is-direct-dispatch)
-                 (leader--empty-p (leader-context-prefix dispatch-ctx))
-                 (leader-context-modifier dispatch-ctx)))
+                 (keypad--empty-p (keypad-context-prefix dispatch-ctx))
+                 (keypad-context-modifier dispatch-ctx)))
            (suppressed (and continuation-p is-direct-dispatch)))
 
       (when suppressed
@@ -481,128 +481,128 @@ Returns :done, :continue, or nil (toggle, re-read)."
       ;; Prefer-command: check if bound command should win over dispatch
       (let ((cmd-result
              (and dispatch (not is-toggle-dispatch)
-                  (not (eq leader-dispatch-priority nil))
-                  (let* ((resolved (leader--resolve-key
+                  (not (eq keypad-dispatch-priority nil))
+                  (let* ((resolved (keypad--resolve-key
                                     acc current-modifier
-                                    (leader-context-fallback ctx) char))
+                                    (keypad-context-fallback ctx) char))
                          (key-str (car resolved))
                          (fallback-p (cdr resolved)))
-                    (when (and (leader--lookup-key key-str)
-                               (commandp (leader--lookup-key key-str) t)
-                               (leader--command-wins-p
-                                leader-dispatch-priority fallback-p))
+                    (when (and (keypad--lookup-key key-str)
+                               (commandp (keypad--lookup-key key-str) t)
+                               (keypad--command-wins-p
+                                keypad-dispatch-priority fallback-p))
                       (cons key-str
                             (if (and (not (string-empty-p key-str))
-                                     (leader--binding-is-prefix-keymap-p
-                                      (leader--lookup-key key-str)))
+                                     (keypad--binding-is-prefix-keymap-p
+                                      (keypad--lookup-key key-str)))
                                 :continue :done)))))))
         (when cmd-result
           (setcar prefix-keys (car cmd-result))
-          (setcdr prefix-keys (leader-context-modifier ctx))
-          (cl-return-from leader--process-char (cdr cmd-result))))
+          (setcdr prefix-keys (keypad-context-modifier ctx))
+          (cl-return-from keypad--process-char (cdr cmd-result))))
 
       (cond
        ;; Toggle
        ((or is-toggle-dispatch
-            (and (null dispatch) (eq char (leader-context-leader-char ctx))))
-        (when (not (eq leader-toggle-priority nil))
-          (let* ((resolved (leader--resolve-key
+            (and (null dispatch) (eq char (keypad-context-keypad-char ctx))))
+        (when (not (eq keypad-toggle-priority nil))
+          (let* ((resolved (keypad--resolve-key
                             acc current-modifier
-                            (leader-context-fallback ctx) char))
+                            (keypad-context-fallback ctx) char))
                  (key-str (car resolved))
                  (fallback-p (cdr resolved)))
-            (when (and (leader--lookup-key key-str)
-                       (commandp (leader--lookup-key key-str) t)
-                       (leader--command-wins-p
-                        leader-toggle-priority fallback-p))
+            (when (and (keypad--lookup-key key-str)
+                       (commandp (keypad--lookup-key key-str) t)
+                       (keypad--command-wins-p
+                        keypad-toggle-priority fallback-p))
               (setcar prefix-keys key-str)
-              (setcdr prefix-keys (leader-context-modifier ctx))
-              (cl-return-from leader--process-char :done))))
+              (setcdr prefix-keys (keypad-context-modifier ctx))
+              (cl-return-from keypad--process-char :done))))
         (let ((target (if (and is-toggle-dispatch dispatch-ctx)
-                          (leader-context-toggle-target dispatch-ctx)
-                        (leader-context-toggle-target ctx))))
+                          (keypad-context-toggle-target dispatch-ctx)
+                        (keypad-context-toggle-target ctx))))
           (setcdr prefix-keys (if current-modifier nil target)))
         nil)
 
        ;; Modifier-prefix dispatch: read second key
        (is-modifier-dispatch
-        (let* ((new-modifier (leader-context-modifier dispatch-ctx))
-               (new-fallback (leader-context-fallback dispatch-ctx))
-               (new-toggle (leader-context-toggle-target dispatch-ctx))
+        (let* ((new-modifier (keypad-context-modifier dispatch-ctx))
+               (new-fallback (keypad-context-fallback dispatch-ctx))
+               (new-toggle (keypad-context-toggle-target dispatch-ctx))
                (target (or new-modifier ""))
                (char2 nil))
           (if (and continuation-p
-                   (not (leader--modifier-has-completions-p acc target)))
-              (let ((resolved (leader--resolve-key
+                   (not (keypad--modifier-has-completions-p acc target)))
+              (let ((resolved (keypad--resolve-key
                                acc current-modifier
-                               (leader-context-fallback ctx) char)))
+                               (keypad-context-fallback ctx) char)))
                 (setcar prefix-keys (car resolved))
-                (setcdr prefix-keys (leader-context-modifier ctx))
-                (cl-return-from leader--process-char :done))
-            (setq char2 (leader--read-modifier-event
+                (setcdr prefix-keys (keypad-context-modifier ctx))
+                (cl-return-from keypad--process-char :done))
+            (setq char2 (keypad--read-modifier-event
                          target (if continuation-p acc "")))
             (setcar prefix-keys
                     (if continuation-p
                         (concat acc " " target (single-key-description char2))
                       (concat target (single-key-description char2))))
-            (setcdr prefix-keys (leader-context-modifier ctx))
-            (setf (leader-context-fallback ctx) new-fallback
-                  (leader-context-modifier ctx) new-modifier
-                  (leader-context-toggle-target ctx) new-toggle))
+            (setcdr prefix-keys (keypad-context-modifier ctx))
+            (setf (keypad-context-fallback ctx) new-fallback
+                  (keypad-context-modifier ctx) new-modifier
+                  (keypad-context-toggle-target ctx) new-toggle))
           :done))
 
        ;; Direct dispatch (prefix switch) or no dispatch
        (t
         (if dispatch-ctx
-            (let ((new-prefix (leader-context-prefix dispatch-ctx))
-                  (new-modifier (leader-context-modifier dispatch-ctx))
-                  (new-fallback (leader-context-fallback dispatch-ctx))
-                  (new-toggle (leader-context-toggle-target dispatch-ctx))
+            (let ((new-prefix (keypad-context-prefix dispatch-ctx))
+                  (new-modifier (keypad-context-modifier dispatch-ctx))
+                  (new-fallback (keypad-context-fallback dispatch-ctx))
+                  (new-toggle (keypad-context-toggle-target dispatch-ctx))
                   (new-local-dispatch
-                   (leader-context-local-dispatch-alist dispatch-ctx)))
+                   (keypad-context-local-dispatch-alist dispatch-ctx)))
               (setcar prefix-keys new-prefix)
               (setcdr prefix-keys new-modifier)
-              (setf (leader-context-fallback ctx) new-fallback
-                    (leader-context-modifier ctx) new-modifier
-                    (leader-context-prefix ctx) new-prefix
-                    (leader-context-toggle-target ctx) new-toggle
-                    (leader-context-local-dispatch-alist ctx)
+              (setf (keypad-context-fallback ctx) new-fallback
+                    (keypad-context-modifier ctx) new-modifier
+                    (keypad-context-prefix ctx) new-prefix
+                    (keypad-context-toggle-target ctx) new-toggle
+                    (keypad-context-local-dispatch-alist ctx)
                     new-local-dispatch))
-          (let ((resolved (leader--resolve-key
+          (let ((resolved (keypad--resolve-key
                            acc current-modifier
-                           (leader-context-fallback ctx) char)))
+                           (keypad-context-fallback ctx) char)))
             (setcar prefix-keys (car resolved))
-            (setcdr prefix-keys (leader-context-modifier ctx))))
+            (setcdr prefix-keys (keypad-context-modifier ctx))))
         (let* ((resolved-key (car prefix-keys))
-               (binding (leader--lookup-key resolved-key)))
+               (binding (keypad--lookup-key resolved-key)))
           (if (and (not (string-empty-p resolved-key))
-                   (leader--binding-is-prefix-keymap-p binding))
+                   (keypad--binding-is-prefix-keymap-p binding))
               :continue :done)))))))
 
-(defun leader--run-handler (vkeys ctx)
+(defun keypad--run-handler (vkeys ctx)
   "Process leader key event VKEYS using CTX, return translated key vector."
   (let* ((len (length vkeys))
          (leader (aref vkeys (1- len))))
-    (setf (leader-context-leader-char ctx) leader)
+    (setf (keypad-context-keypad-char ctx) leader)
     (cond
-     ((leader--pass-through-p (leader-context-pass-through-predicates ctx))
+     ((keypad--pass-through-p (keypad-context-pass-through-predicates ctx))
       (vector leader))
      ((= len 1)
       (with-no-warnings
         (let ((which-key-inhibit t))
           (condition-case nil
-              (let* ((prefix-keys (cons (leader-context-prefix ctx)
-                                        (leader-context-modifier ctx)))
+              (let* ((prefix-keys (cons (keypad-context-prefix ctx)
+                                        (keypad-context-modifier ctx)))
                      (continuation-p nil)
                      (state :read)
                      (which-key-this-command-keys-function
                       (lambda () (kbd (car prefix-keys)))))
                 (while (not (eq state :done))
-                  (let ((char (leader--read-event-with-which-key
-                               (leader--prompt (car prefix-keys)
+                  (let ((char (keypad--read-event-with-which-key
+                               (keypad--prompt (car prefix-keys)
                                                (cdr prefix-keys))
                                (cdr prefix-keys) (car prefix-keys))))
-                    (setq state (leader--process-char
+                    (setq state (keypad--process-char
                                  ctx char prefix-keys continuation-p))
                     (when (eq state :continue)
                       (setq continuation-p t state :read))))
@@ -614,47 +614,47 @@ Returns :done, :continue, or nil (toggle, re-read)."
              nil)))))
      (t (vector leader)))))
 
-(defun leader--make-handler (ctx)
+(defun keypad--make-handler (ctx)
   "Return a `key-translation-map' handler closure for CTX."
   (lambda (_)
-    (leader--run-handler (this-command-keys-vector) (copy-leader-context ctx))))
+    (keypad--run-handler (this-command-keys-vector) (copy-keypad-context ctx))))
 
 
 ;;; Install / uninstall
 
-(defun leader--uninstall ()
+(defun keypad--uninstall ()
   "Remove all leader key handlers from `key-translation-map'."
-  (when leader--installed
-    (dolist (ctx leader--normalized-config)
-      (let ((char (leader-context-leader-char ctx)))
+  (when keypad--installed
+    (dolist (ctx keypad--normalized-config)
+      (let ((char (keypad-context-keypad-char ctx)))
         (define-key key-translation-map
                     (kbd (key-description (vector char)))
                     nil))))
-  (setq leader--installed nil))
+  (setq keypad--installed nil))
 
-(defun leader--install ()
+(defun keypad--install ()
   "Install all leader key handlers into `key-translation-map'."
-  (leader--uninstall)
-  (leader--normalize-config)
-  (dolist (ctx leader--normalized-config)
-    (let ((char (leader-context-leader-char ctx)))
+  (keypad--uninstall)
+  (keypad--normalize-config)
+  (dolist (ctx keypad--normalized-config)
+    (let ((char (keypad-context-keypad-char ctx)))
       (define-key key-translation-map
                   (kbd (key-description (vector char)))
-                  (leader--make-handler ctx))))
-  (setq leader--installed t))
+                  (keypad--make-handler ctx))))
+  (setq keypad--installed t))
 
 ;;;###autoload
-(define-minor-mode leader-mode
+(define-minor-mode keypad-mode
   "Global minor mode for leader key support.
-When enabled, leader keys defined in `leader-keys' are activated
+When enabled, leader keys defined in `keypad-keys' are activated
 in `key-translation-map'."
   :global t
-  :group 'leader
-  (if leader-mode (leader--install) (leader--uninstall)))
+  :group 'keypad
+  (if keypad-mode (keypad--install) (keypad--uninstall)))
 
-(provide 'leader)
+(provide 'keypad)
 
 ;; Local Variables:
 ;; coding: utf-8
 ;; End:
-;;; leader.el ends here
+;;; keypad.el ends here

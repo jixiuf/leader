@@ -1,4 +1,4 @@
-# leader.el
+# keypad.el
 
 A modal leader-key package for Emacs.  It intercepts one or more "leader keys"
 via `key-translation-map` and translates subsequent keystrokes into standard
@@ -7,14 +7,14 @@ Emacs key sequences, so you can type `SPC f` instead of `C-c C-f`, etc.
 ## Quick Start
 
 ```elisp
-(require 'leader)
-(require 'leader-which-key)
-(leader-mode 1)
+(require 'keypad)
+(require 'keypad-which-key)
+(keypad-mode 1)
 ```
 
 ## Configuration
 
-`leader-keys` is a list of plists.  Each entry describes one leader key:
+`keypad-keys` is a list of plists.  Each entry describes one leader key:
 
 | Keyword | Required | Default | Description |
 |---------|----------|---------|-------------|
@@ -33,7 +33,7 @@ Emacs key sequences, so you can type `SPC f` instead of `C-c C-f`, etc.
 
 ### Per-Key Pass-Through
 
-Each leader key can override the global `leader-pass-through-predicates`:
+Each leader key can override the global `keypad-pass-through-predicates`:
 
 ```elisp
 ;; , passes through in vc-dir-mode, otherwise acts as C-M- leader
@@ -96,8 +96,8 @@ In continuation:
 
 | Variable | Default | Controls |
 |----------|---------|----------|
-| `leader-dispatch-priority` | nil | Dispatch vs. bound-command |
-| `leader-toggle-priority` | nil | Toggle vs. bound-command |
+| `keypad-dispatch-priority` | nil | Dispatch vs. bound-command |
+| `keypad-toggle-priority` | nil | Toggle vs. bound-command |
 
 Values for both:
 
@@ -108,15 +108,15 @@ Values for both:
 | `:primary` | Primary command wins; fallback loses to feature |
 
 ```elisp
-(setq leader-dispatch-priority nil)  ; dispatch always wins
-(setq leader-toggle-priority t)      ; toggle checks bound commands
+(setq keypad-dispatch-priority nil)  ; dispatch always wins
+(setq keypad-toggle-priority t)      ; toggle checks bound commands
 ;; → SPC x → dispatch to C-x (dispatch wins)
 ;; → SPC SPC → C-c C-SPC if bound, else toggle
 ```
 
 ## Pass-Through Predicates
 
-`leader-pass-through-predicates` controls when leader keys act as literal
+`keypad-pass-through-predicates` controls when leader keys act as literal
 characters.  Each element is:
 
 - A **function**: called with no args, pass-through if non-nil
@@ -124,13 +124,13 @@ characters.  Each element is:
   → non-command function.  Mode symbols work even if their variable is void.
 
 ```elisp
-(setq leader-pass-through-predicates '(minibufferp isearch-mode))
+(setq keypad-pass-through-predicates '(minibufferp isearch-mode))
 ```
 
 ## Which-Key Integration
 
 ```elisp
-(require 'leader-which-key)
+(require 'keypad-which-key)
 ```
 
 Automatically enables which-key popup during leader sequences, including
@@ -138,30 +138,30 @@ modifier-prefix contexts.  Respects `which-key-idle-delay`, supports C-h n/p.
 
 | Custom variable | Default | Description |
 |-----------------|---------|-------------|
-| `leader-which-key-modifier-max-bindings` | 150 | Max bindings in modifier-prefix popup (nil = unlimited) |
+| `keypad-which-key-modifier-max-bindings` | 150 | Max bindings in modifier-prefix popup (nil = unlimited) |
 
 ## Commands / Variables
 
 | Command | Description |
 |---------|-------------|
-| `leader-mode` | Global minor mode |
+| `keypad-mode` | Global minor mode |
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `leader-keys` | nil | Leader key configurations |
-| `leader-pass-through-predicates` | `(minibufferp isearch-mode)` | Global pass-through predicates |
-| `leader-dispatch-priority` | nil | Dispatch vs. command priority |
-| `leader-toggle-priority` | nil | Toggle vs. command priority |
+| `keypad-keys` | nil | Leader key configurations |
+| `keypad-pass-through-predicates` | `(minibufferp isearch-mode)` | Global pass-through predicates |
+| `keypad-dispatch-priority` | nil | Dispatch vs. command priority |
+| `keypad-toggle-priority` | nil | Toggle vs. command priority |
 
 ## Full Configuration Demo
 
 ```elisp
-(require 'leader)
-(require 'leader-which-key)
+(require 'keypad)
+(require 'keypad-which-key)
 
-(setq leader-pass-through-predicates '(minibufferp isearch-mode))
+(setq keypad-pass-through-predicates '(minibufferp isearch-mode))
 
-(setq leader-keys
+(setq keypad-keys
   '((:key "<SPC>" :prefix "C-c" :modifier "" :fallback "C-"
      :dispatch
      ((?x . (:prefix "C-x" :modifier "C-" :fallback "C-"))
@@ -173,7 +173,7 @@ modifier-prefix contexts.  Respects `which-key-idle-delay`, supports C-h n/p.
     (:key "." :prefix nil :modifier "C-M-" :fallback nil
      :pass-through-predicates (vc-dir-mode))))
 
-(leader-mode 1)
+(keypad-mode 1)
 ```
 
 **Explanations:**

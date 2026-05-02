@@ -1,4 +1,4 @@
-# leader.el — Architecture
+# keypad.el — Architecture
 
 ## Overview
 
@@ -17,28 +17,28 @@ User presses SPC f
 
 | File | Lines | Role |
 |------|-------|------|
-| `leader.el` | ~650 | Core: config, normalization, handler, install/uninstall |
-| `leader-which-key.el` | ~230 | Optional which-key popup module, connected via hooks |
-| `test/leader-test.el` | ~485 | 50 ERT tests covering all features |
+| `keypad.el` | ~650 | Core: config, normalization, handler, install/uninstall |
+| `keypad-which-key.el` | ~230 | Optional which-key popup module, connected via hooks |
+| `test/keypad-test.el` | ~485 | 50 ERT tests covering all features |
 | `README.md` | ~200 | User-facing docs with full config demo |
 
 ## Data Model
 
-### `leader-context` struct
+### `keypad-context` struct
 
 The central data structure.  Every leader key and every dispatch entry is
 normalized into one instance.  All fields are fully resolved at normalize time;
 no runtime default-filling.
 
 ```
-(cl-defstruct leader-context
+(cl-defstruct keypad-context
   prefix                  ; "C-x", "C-c", nil (modifier-only)
   modifier                ; "C-", "M-", nil
   fallback                ; "C-", nil (always explicit)
   toggle-target           ; "C-", nil
-  dispatch-alist          ; ((char . leader-context) ...)  root-level
-  local-dispatch-alist    ; ((char . leader-context) ...)  cont-only, nil=use root
-  leader-char             ; integer event code
+  dispatch-alist          ; ((char . keypad-context) ...)  root-level
+  local-dispatch-alist    ; ((char . keypad-context) ...)  cont-only, nil=use root
+  keypad-char             ; integer event code
   pass-through-predicates) ; nil=use global, list=per-key override
 ```
 
@@ -49,28 +49,28 @@ no runtime default-filling.
 (:key "<SPC>" :prefix "C-c" :modifier "C-" :fallback "C-"
  :dispatch ((?x . (:prefix "C-x" :modifier "C-" :fallback "C-"))))
 
-;; After leader--normalize-config:
-#s(leader-context
+;; After keypad--normalize-config:
+#s(keypad-context
    prefix "C-c" modifier "C-" fallback "C-" toggle-target nil
-   dispatch-alist ((?x . #s(leader-context prefix "C-x" modifier "C-" ...)))
-   local-dispatch-alist nil leader-char 32 pass-through-predicates nil)
+   dispatch-alist ((?x . #s(keypad-context prefix "C-x" modifier "C-" ...)))
+   local-dispatch-alist nil keypad-char 32 pass-through-predicates nil)
 ```
 
 ## Normalization Pipeline
 
 ```
-leader-keys (user plists)
+keypad-keys (user plists)
   │
-  ├─ leader--normalize-config()
+  ├─ keypad--normalize-config()
   │    ├─ Extract :key, :prefix, :modifier, :fallback, :toggle
-  │    ├─ leader--normalize-prefix-plist(plist) → (prefix mod fb toggle local-dispatch)
+  │    ├─ keypad--normalize-prefix-plist(plist) → (prefix mod fb toggle local-dispatch)
   │    │    ├─ Empty-string → nil normalization
   │    │    ├─ Fallback default: (null prefix) → nil, else → modifier
-  │    │    └─ Toggle default: leader--infer-toggle(modifier, fallback)
-  │    └─ leader--normalize-dispatch(alist)
+  │    │    └─ Toggle default: keypad--infer-toggle(modifier, fallback)
+  │    └─ keypad--normalize-dispatch(alist)
   │         └─ Recursively normalizes nested :dispatch entries
   │
-  └─ leader--normalized-config (cached list of leader-context)
+  └─ keypad--normalized-config (cached list of keypad-context)
 ```
 
 ### Inference Rules
@@ -85,11 +85,11 @@ leader-keys (user plists)
 ```
 key-translation-map
   │
-  └─ leader--make-handler(ctx) → closure
-       └─ leader--run-handler(vkeys, ctx)
+  └─ keypad--make-handler(ctx) → closure
+       └─ keypad--run-handler(vkeys, ctx)
             │
             ├─ len > 1: pass through (not a fresh leader press)
-            ├─ leader--pass-through-p(ctx.pass-through-predicates): pass through
+            ├─ keypad--pass-through-p(ctx.pass-through-predicates): pass through
             │
             └─ len = 1: MAIN LOOP
                  │
@@ -99,11 +99,11 @@ key-translation-map
                  │                                         │
                  │  WHILE state ≠ :done                    │
                  │    │                                     │
-                 │    ├─ leader--read-event-with-which-key │
-                 │    │   ├─ leader--which-key-show-fn     │──→ which-key popup
-                 │    │   └─ leader--which-key-read-fn     │──→ paging support
+                 │    ├─ keypad--read-event-with-which-key │
+                 │    │   ├─ keypad--which-key-show-fn     │──→ which-key popup
+                 │    │   └─ keypad--which-key-read-fn     │──→ paging support
                  │    │                                     │
-                 │    └─ leader--process-char(ctx, char,   │
+                 │    └─ keypad--process-char(ctx, char,   │
                  │          prefix-keys, continuation-p)    │
                  │         │                                 │
                  │         ├─ :done     → exit loop         │
@@ -114,7 +114,7 @@ key-translation-map
                  └─────────────────────────────────────────┘
 ```
 
-## leader--process-char — Core Dispatch Logic
+## keypad--process-char — Core Dispatch Logic
 
 ```
 1. Determine dispatch alist:
@@ -128,27 +128,27 @@ key-translation-map
 
 3. Suppress direct dispatch in continuation (continuation-p && is-direct-dispatch)
 
-4. Prefer-command check (non-nil leader-dispatch-priority only):
-   Resolve char via leader--resolve-key → if bound command wins → return :done
+4. Prefer-command check (non-nil keypad-dispatch-priority only):
+   Resolve char via keypad--resolve-key → if bound command wins → return :done
 
 5. Route to handler:
    ├─ TOGGLE
-   │   ├─ Prefer-command (leader-toggle-priority ≠ nil): check bound command
+   │   ├─ Prefer-command (keypad-toggle-priority ≠ nil): check bound command
    │   └─ Flip modifier: current-modifier → nil → toggle-target → ...
    │
    ├─ MODIFIER-PREFIX (e.g., ?m → M-)
    │   ├─ continuation-p && no completions → fallback (e883dd3)
-   │   └─ Read second key via leader--read-modifier-event → build key
+   │   └─ Read second key via keypad--read-modifier-event → build key
    │
    └─ t (direct dispatch or no dispatch)
        ├─ dispatch-ctx: set new prefix/modifier/fallback/toggle/local-dispatch
-       └─ no dispatch: apply leader--resolve-key
+       └─ no dispatch: apply keypad--resolve-key
        └─ Check binding: keymap → :continue, command → :done
 ```
 
 ## Modifier/Fallback Resolution
 
-`leader--resolve-key(prefix, modifier, fallback, char)` → `(KEY-STRING . FALLBACK-P)`
+`keypad--resolve-key(prefix, modifier, fallback, char)` → `(KEY-STRING . FALLBACK-P)`
 
 ```
 modifier non-nil:
@@ -180,17 +180,17 @@ Two independent variables:
 
 | Variable | Default | Controls |
 |----------|---------|----------|
-| `leader-dispatch-priority` | nil | Whether dispatch entries or bound commands win |
-| `leader-toggle-priority` | nil | Whether toggle or bound commands win |
+| `keypad-dispatch-priority` | nil | Whether dispatch entries or bound commands win |
+| `keypad-toggle-priority` | nil | Whether toggle or bound commands win |
 
-Both use `leader--command-wins-p(priority, fallback-p)`:
+Both use `keypad--command-wins-p(priority, fallback-p)`:
 - `nil` → feature always wins
 - `t` → command always wins (primary + fallback)
 - `:primary` → primary command wins; fallback match loses
 
 ## Pass-Through Predicates
 
-`leader--pass-through-p(&optional predicates)` checks each element:
+`keypad--pass-through-p(&optional predicates)` checks each element:
 
 ```
 symbol:
@@ -202,18 +202,18 @@ symbol:
 function: funcall → non-nil means pass-through
 ```
 
-Per-key override via `:pass-through-predicates` on leader-keys entries.
+Per-key override via `:pass-through-predicates` on keypad-keys entries.
 
 ## Which-Key Integration
 
-`leader-which-key.el` is a separate optional module.  It communicates with the
+`keypad-which-key.el` is a separate optional module.  It communicates with the
 core through three hook variables:
 
 | Hook | Set by which-key module | Called from core |
 |------|------------------------|------------------|
-| `leader--which-key-show-fn` | `leader--which-key-show` | `leader--read-event-with-which-key` |
-| `leader--which-key-modifier-read-fn` | `leader--which-key-modifier-read` | `leader--read-modifier-event` |
-| `leader--which-key-read-event-fn` | `leader-wk--read-event` | `leader--read-event-with-which-key` |
+| `keypad--which-key-show-fn` | `keypad--which-key-show` | `keypad--read-event-with-which-key` |
+| `keypad--which-key-modifier-read-fn` | `keypad--which-key-modifier-read` | `keypad--read-modifier-event` |
+| `keypad--which-key-read-event-fn` | `keypad-wk--read-event` | `keypad--read-event-with-which-key` |
 
 The core never depends on which-key — when hooks are nil, it falls back to
 plain `read-event` and `message` prompts.
@@ -221,37 +221,37 @@ plain `read-event` and `message` prompts.
 ### Architecture
 
 ```
-leader.el                          leader-which-key.el
+keypad.el                          keypad-which-key.el
 ─────────                          ───────────────────
-leader--read-event-with-which-key
-  ├─ funcall show-fn ─────────────→ leader--which-key-show
-  │                                  ├─ leader-wk--collect-prefix-bindings (keymap)
-  │                                  │  or leader-wk--modifier-bindings (mod-only)
+keypad--read-event-with-which-key
+  ├─ funcall show-fn ─────────────→ keypad--which-key-show
+  │                                  ├─ keypad-wk--collect-prefix-bindings (keymap)
+  │                                  │  or keypad-wk--modifier-bindings (mod-only)
   │                                  ├─ which-key--format-and-replace
   │                                  ├─ which-key--create-pages
-  │                                  └─ sit-for + leader-wk--show-popup
-  └─ funcall read-event-fn ───────→ leader-wk--read-event
-                                      └─ paging: C-h n/p via leader-wk--next-page
+  │                                  └─ sit-for + keypad-wk--show-popup
+  └─ funcall read-event-fn ───────→ keypad-wk--read-event
+                                      └─ paging: C-h n/p via keypad-wk--next-page
 
-leader--read-modifier-event
-  └─ funcall modifier-read-fn ────→ leader--which-key-modifier-read
-                                      ├─ leader-wk--hide (clear old popup)
-                                      ├─ leader-wk--modifier-bindings (from all maps)
-                                      │  └─ leader--collect-modifier-bindings (core)
+keypad--read-modifier-event
+  └─ funcall modifier-read-fn ────→ keypad--which-key-modifier-read
+                                      ├─ keypad-wk--hide (clear old popup)
+                                      ├─ keypad-wk--modifier-bindings (from all maps)
+                                      │  └─ keypad--collect-modifier-bindings (core)
                                       ├─ continuation filtering (prefix + key-binding)
                                       ├─ which-key--create-pages
-                                      └─ sit-for + leader-wk--show-popup
+                                      └─ sit-for + keypad-wk--show-popup
 ```
 
 ## Test Patterns
 
 Tests use mock injection via dynamic variables:
-- `leader--event-reader` → mock that pops from a list of events
-- `leader--key-lookup-fn` → mock that looks up binding alists
-- `leader-test--do-run(config, bindings, events)` → sets up mocks, calls handler
+- `keypad--event-reader` → mock that pops from a list of events
+- `keypad--key-lookup-fn` → mock that looks up binding alists
+- `keypad-test--do-run(config, bindings, events)` → sets up mocks, calls handler
 
 ```elisp
-(should (equal (leader-test--do-run
+(should (equal (keypad-test--do-run
                 '((:key "<SPC>" :prefix "C-c" :modifier "C-" :fallback "C-"))
                 '(("C-c C-f" . ignore))      ; mock bindings
                 '(?f))                        ; mock events
@@ -260,13 +260,13 @@ Tests use mock injection via dynamic variables:
 
 ## Install / Uninstall
 
-`leader-mode` is a global minor mode:
-- Enable: `leader--normalize-config()` → `leader--install()`
+`keypad-mode` is a global minor mode:
+- Enable: `keypad--normalize-config()` → `keypad--install()`
   → define-key in `key-translation-map` for each leader
-- Disable: `leader--uninstall()` → remove from `key-translation-map`
+- Disable: `keypad--uninstall()` → remove from `key-translation-map`
 
-Handlers are closures created by `leader--make-handler(ctx)` which copies the
-context before each invocation (via `copy-leader-context`) to avoid state leaks.
+Handlers are closures created by `keypad--make-handler(ctx)` which copies the
+context before each invocation (via `copy-keypad-context`) to avoid state leaks.
 
 ## Key Design Decisions
 
@@ -274,13 +274,13 @@ context before each invocation (via `copy-leader-context`) to avoid state leaks.
    input level, works in any mode, no keymap conflicts.
 
 2. **Normalize upfront** — all config parsing, default filling, and inference
-   happens once in `leader--normalize-config`.  Runtime code has zero
+   happens once in `keypad--normalize-config`.  Runtime code has zero
    conditional logic for config defaults.
 
 3. **Hook-based which-key** — core never imports which-key.  Three hook
    variables provide clean separation.  No which-key → plain prompts still work.
 
-4. **Per-context state** — each dispatch entry carries its own `leader-context`
+4. **Per-context state** — each dispatch entry carries its own `keypad-context`
    with independent modifier, fallback, toggle-target, and local dispatches.
    Entering a dispatch copies relevant fields into the active ctx.
 
