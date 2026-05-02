@@ -1,316 +1,172 @@
 # leader.el
 
-A modal leader-key package for Emacs that intercepts one or more "leader keys" via
-`key-translation-map` and translates subsequent keystrokes into standard Emacs key sequences, so you
-can type `SPC x f` instead of `C-x C-f`, etc.
-
-## Installation
-
-```elisp
-(add-to-list 'load-path "/path/to/leader")
-(require 'leader)
-(leader-mode 1)
-```
+A modal leader-key package for Emacs.  It intercepts one or more "leader keys"
+via `key-translation-map` and translates subsequent keystrokes into standard
+Emacs key sequences, so you can type `SPC f` instead of `C-c C-f`, etc.
 
 ## Quick Start
 
 ```elisp
 (require 'leader)
-(leader-mode 1)           ; enable
-(leader-mode -1)          ; disable
+(require 'leader-which-key)
+(leader-mode 1)
 ```
 
 ## Configuration
 
-### `leader-keys'
+`leader-keys` is a list of plists.  Each entry describes one leader key:
 
-A list of leader key configurations. Each element has the form:
+| Keyword | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `:key` | yes | — | Leader key string (`"<SPC>"`, `","`) |
+| `:prefix` | yes | — | Target prefix string (`"C-c"`, `"M-s"`, `""` for modifier-only) |
+| `:modifier` | no | inferred | Default modifier (`"C-"`, `"M-"`, nil). Empty string = nil |
+| `:fallback` | no | inferred | Fallback modifier. nil = plain only |
+| `:toggle` | no | inferred | Toggle target modifier (see toggle section) |
+| `:dispatch` | no | nil | Alist `(CHAR . PLIST)` or `(CHAR . :toggle)` |
 
-```elisp
-(LEADER-KEY DEFAULT-PREFIX [DISPATCH-ENTRY ...])
-```
+### Default Inference
 
-- `LEADER-KEY`: A key description string (e.g. `"<SPC>"`, `","`).
-- `DEFAULT-PREFIX`: Either a string or a list specifying the prefix, modifier-default, and optionally fallback-modifier.
+- **`:fallback`** defaults to `:modifier` (regular prefix) or nil (modifier-only prefix)
+- **`:toggle`** defaults to fallback if fallback differs from modifier, else nil (flip on/off) or `"C-"` (modifier=nil)
 
-#### DEFAULT-PREFIX Formats
-
-| Format | modifier-default | fallback-modifier | Description |
-|--------|---------------|-------------------|-------------|
-| `"C-c"` | `"C-"` | `"C-"` | Auto-add C- to keys |
-| `("C-c" nil)` | `nil` | `nil` | No modifier, no fallback |
-| `("C-c" nil "C-")` | `nil` | `"C-"` | Plain keys, fallback to C- |
-| `("C-c" "C-")` | `"C-"` | `"C-"` | Explicit C- |
-| `("C-c" "M-")` | `"M-"` | `"M-"` | Auto-add M- |
-
-The third element (`fallback-modifier`) is optional. When omitted it
-defaults to `modifier-default`.
-
-#### Examples
-
-```elisp
-;; Single leader with modifier-default="C-" (default)
-'(("<SPC>" "C-c"
-   (?h . "C-h")
-   (?x . "C-x")))
-
-;; Single leader with modifier-default=nil, fallback-modifier="C-"
-'(("<SPC>" ("C-c" nil "C-")
-   (?h . ("C-h" nil))
-   (?x . ("C-x" "C-")))
-
-;; Multiple leaders
-'(("<SPC>" ("C-c" nil "C-")
-   (?h . ("C-h" nil))
-   (?x . ("C-x" "C-")))
- ("," "M-o"))
-```
-
-## Dispatch Entry Types
-
-Dispatch entries apply at **every level**, including inside prefix keymaps
-(after entering a prefix like `C-x`). Use `leader-dispatch-priority`
-to control priority between bound commands and dispatch entries.
-
-### Prefix Switch
-
-```elisp
-(?x . "C-x")            ; SPC x f -> C-x C-f (reset to defaults)
-(?h . ("C-h" nil))      ; SPC h k -> C-h k (modifier=nil)
-(?g . ("C-x" "M-"))    ; SPC g f -> C-x M-f (modifier="M-")
-```
-
-With fallback override (third element):
-```elisp
-(?x . ("C-x" "C-" nil)) ; SPC x f -> C-x C-f (C- only, no plain fallback)
-(?h . ("C-h" nil "C-")) ; SPC h k -> C-h k (plain first, fallback to C-)
-```
-
-### Modifier Prefix (values ending with "-")
-
-```elisp
-(?r . "M-")    ; SPC r x -> M-x
-(?e . "C-M-")  ; SPC e f -> C-M-f
-```
-
-### Modifier Toggle (`"C-"`)
-
-Pressing the leader key itself (when not in dispatch alist) or a key dispatched to `"C-"` toggles the modifier state between `modifier-default` and `nil` (or `"C-"` if `modifier-default` is also nil).
-
-| DEFAULT-PREFIX | modifier-default | toggle-target |
-|---------------|----------------|--------------|
-| `"C-c"` | `"C-"` | `nil` |
-| `("C-c" "C-")` | `"C-"` | `nil` |
-| `("C-c" nil)` | `nil` | `"C-"` |
-| `("C-c" "M-")` | `"M-"` | `nil` |
-
-### Key Resolution Logic
-
-When modifier is non-nil:
-1. Try `modifier+char` first
-2. Fall back to plain char if no binding
-
-When modifier is nil:
-1. Try plain char first
-2. Fall back to `fallback-modifier+char` if set and binding exists
-
-## Predicates for Pass-through
-
-`leader-pass-through-predicates` controls when the leader key passes through as a normal key (e.g., SPC inserts a space). By default, pass through happens in the minibuffer and during isearch.
-
-Each element is either:
-- A function (or lambda): called with no arguments, pass through if non-nil.
-- A symbol: if bound as a variable, use its value; if bound as a function, call it.
-
-```elisp
-;; Default value:
-(setq leader-pass-through-predicates
-      '(minibufferp isearch-mode))
-
-;; For helix:
-(add-to-list 'leader-pass-through-predicates
-             (lambda () (eq helix--current-state 'insert)))
-
-;; For evil:
-(add-to-list 'leader-pass-through-predicates
-             (lambda () (evil-insert-state-p)))
-
-;; Pass through when a minor mode is active:
-(add-to-list 'leader-pass-through-predicates 'my-special-input-mode)
-```
-
-## Dispatch in Continuation
-
-Dispatch entries apply at **every level**, including inside prefix keymaps.
-After entering a prefix (e.g., `C-x`), subsequent keys still consult the
-dispatch alist.
-
-```elisp
-;; With modifier-default=nil, dispatch has (?b . ("C-b" "C-")):
-;;   SPC a → C-c a (prefix), b → dispatch to C-b (direct, in continuation)
-;;   Then f → C-c a C-b C-f
-```
-
-### `leader-dispatch-priority`
-
-Priority ordering for resolving dispatch vs. command conflicts.
-When a key matches a dispatch entry AND resolves to a bound command,
-the higher-priority action wins.
-
-Categories (ordered by priority, higher first):
-- `:dispatch` — direct key sequences (e.g. `C-x`, `C-b`)
-- `:modifier-prefix` — modifier prefixes (e.g. `M-`, `C-M-`)
-- `:toggle` — modifier toggles (`C-` dispatch, leader double-press)
-- `:command` — primary bound commands (modifier or plain match)
-- `:command-fallback` — fallback bound commands (modifier-fallback match)
-
-```elisp
-(setq leader-dispatch-priority nil)
-;; Default: dispatch always wins.  Equivalent to:
-;; '(:dispatch :modifier-prefix :toggle)
-
-(setq leader-dispatch-priority t)
-;; Commands (primary and fallback) always win.  Equivalent to:
-;; '(:command :command-fallback)
-
-(setq leader-dispatch-priority '(:modifier-prefix :dispatch :command :command-fallback :toggle))
-;; Modifier prefixes and direct dispatches take priority over primary
-;; commands, primary commands over fallback commands, fallback commands
-;; over toggles.
-
-;; Example: dispatch has (?e . "M-"), and "C-c e" is a bound command
-;; With '(:modifier-prefix :dispatch :command :command-fallback :toggle):
-;;   SPC e → M- (dispatch wins)
-;; With '(:command :command-fallback :modifier-prefix):
-;;   SPC e → C-c e (command wins)
-;; With nil:
-;;   SPC e → M- (dispatch wins)
-```
-
-## Full Configuration Example
+### Examples
 
 ```elisp
 (setq leader-keys
-      '(("<SPC>" ("C-c" nil "C-")  ; prefix, modifier-default, fallback-modifier
-         (?h . ("C-h" nil "C-"))  ; SPC h -> C-h prefix, plain first, fallback C-
-         (?x . ("C-x" "C-" nil)) ; SPC x -> C-x prefix, C- only, no plain fallback
-         (?c . "C-c")            ; SPC c -> C-c prefix (modifier-default)
-         (?r . "M-")            ; SPC r x -> M-x
-         (?e . "C-M-"))         ; SPC e f -> C-M-f
-        ("," "M-o")))
+  '((:key "<SPC>" :prefix "C-c" :modifier "C-" :fallback "C-"
+     :dispatch ((?x . (:prefix "C-x" :modifier "C-" :fallback "C-"))
+                (?h . (:prefix "C-h" :modifier nil  :fallback "C-"))
+                (?s . (:prefix "M-s" :modifier nil  :fallback "M-"))
+                (?m . (:prefix ""   :modifier "M-" :fallback nil))
+                (?d . :toggle)))
+    (:key "," :prefix "" :modifier "C-M-" :fallback nil)))
 ```
 
-## Behavior Examples
+## Dispatch Entries
 
-### With `("C-c" nil "C-")` (modifier-default=nil, fallback-modifier="C-")
+Dispatch entries carry the same keys as a top-level leader entry (except `:key`).
 
-| Keystrokes | Translation | Explanation |
-|------------|-------------|--------------|
-| SPC f | C-c f | modifier=nil, plain f bound |
-| SPC f (no binding) | C-c C-f | fallback to fallback-modifier+char |
-| SPC SPC f | C-c C-f | toggle -> modifier="C-" |
-| SPC x f | C-x C-f | x->("C-x" "C-") -> modifier="C-" |
-| SPC h k | C-h k | h->("C-h" nil) -> modifier=nil |
+| Type | Config | Behavior |
+|------|--------|----------|
+| Prefix switch | `(?x . (:prefix "C-x" :modifier "C-" :fallback "C-"))` | SPC x → enter C-x prefix |
+| Plain modifier | `(?h . (:prefix "C-h" :modifier nil :fallback "C-"))` | SPC h k → C-h k (plain first) |
+| Modifier-prefix | `(?m . (:prefix "" :modifier "M-" :fallback nil))` | SPC m x → M-x |
+| Toggle | `(?d . :toggle)` | SPC d → toggle modifier |
 
-### With `"C-c"` (modifier-default="C-")
+Modifier-prefix dispatches (`:prefix ""` with a modifier) read a second key
+and translate it with the modifier prepended.  In continuation contexts,
+if no completions exist under the current prefix keymap, they fall back
+to plain key resolution.
 
-| Keystrokes | Translation | Explanation |
-|------------|-------------|--------------|
-| SPC f | C-c C-f | modifier="C-", try C-c C-f |
-| SPC f (no binding) | C-c f | fallback to plain f |
-| SPC SPC f | C-c f | toggle -> modifier=nil |
-| SPC x f | C-x C-f | dispatch x->C-x |
+## Key Resolution Logic
 
-### Dispatch in Continuation (modifier-default=nil, dispatch has (?b . ("C-b" "C-")))
+For each subsequent keystroke after the leader key:
 
-| Keystrokes | Translation | Explanation |
-|------------|-------------|--------------|
-| SPC a b | C-c a C-b | a->prefix "C-c a", b->dispatch "C-b" in continuation |
-| SPC a b f | C-c a C-b C-f | dispatch "C-b" then f with C- modifier |
+- **Modifier non-nil**: try `MODIFIER+char` → fall back to plain `char`
+- **Modifier nil**: try plain `char` → fall back to `FALLBACK+char`
 
-### Prefer-command (dispatch has (?e . "C-M-"), C-c e is bound)
+When nothing is bound, the plain key is returned as-is.
 
-| Keystrokes | Translation | Explanation |
-|------------|-------------|--------------|
-| SPC e | C-c e | prefer-command=t (default), command wins |
-| SPC e (nil) | dispatches | prefer-command=nil, dispatch to C-M- |
+## Modifier Toggle
+
+Pressing the leader key itself (SPC SPC) or a `:toggle` dispatch entry toggles
+the current modifier between its value and the `:toggle` target.
+
+Each context (dispatch entry or top-level) has an independent toggle target.
+The default is inferred: if fallback differs from modifier, toggle to fallback;
+if they are the same, toggle on/off (non-nil ↔ nil, nil ↔ `"C-"`).
+
+## Continuation
+
+When a key sequence resolves to a prefix keymap (e.g., C-c a → keymap),
+the handler enters **continuation** and keeps reading keys until a command
+is found or the sequence is exhausted.
+
+In continuation:
+- **Toggle** and **modifier-prefix** dispatches still apply
+- **Direct prefix-switch** dispatches are suppressed (they don't make sense
+  when already inside a prefix)
+- Per-context `:dispatch` on dispatch entries defines local dispatches
+  (modifier-prefix and toggle only) that apply in continuation
+
+```elisp
+;; Define M- and C- modifier-prefix dispatches for C-x continuation
+(?x . (:prefix "C-x" :modifier "C-" :fallback "C-"
+       :dispatch ((?m . (:prefix nil :modifier "M-" :fallback nil))
+                  (?c . (:prefix nil :modifier "C-" :fallback "C-")))))
+;; SPC x m a → C-x M-a  (local M- dispatch)
+;; SPC x c f → C-x C-f  (local C- dispatch)
+```
+
+## Priority System
+
+| Variable | Default | Controls |
+|----------|---------|----------|
+| `leader-dispatch-priority` | nil | Dispatch vs. bound-command |
+| `leader-toggle-priority` | nil | Toggle vs. bound-command |
+
+Values for both:
+
+| Value | Behavior |
+|-------|----------|
+| `nil` | Feature (dispatch/toggle) always wins |
+| `t` | Bound command always wins (primary + fallback) |
+| `:primary` | Primary command wins; fallback loses to feature |
+
+```elisp
+;; Dispatch always wins, toggle checked against bound commands
+(setq leader-dispatch-priority nil)
+(setq leader-toggle-priority t)
+;; → SPC x → dispatch to C-x (dispatch wins)
+;; → SPC SPC → C-c C-SPC if bound, else toggle
+```
+
+## Pass-Through Predicates
+
+`leader-pass-through-predicates` controls when the leader key acts as its
+literal character (e.g., SPC inserts a space).  Each element is:
+
+- A **function**: called with no args, pass-through if non-nil
+- A **symbol**: checked in order: variable value → matches `major-mode`
+  → non-command function.  Mode symbols like `vc-dir-mode` work
+  even if their variable is void.
+
+```elisp
+;; Default — pass through in minibuffer and isearch
+(setq leader-pass-through-predicates '(minibufferp isearch-mode))
+
+;; Evil integration (use lambda — symbols are never funcall'd)
+(add-to-list 'leader-pass-through-predicates
+             (lambda () (and (bound-and-true-p evil-mode)
+                             (evil-insert-state-p))))
+```
+
+## Which-Key Integration
+
+```elisp
+(require 'leader-which-key)
+```
+
+Automatically enables which-key popup display during leader key sequences,
+including modifier-prefix contexts.  The popup respects `which-key-idle-delay`
+and supports C-h n/p paging.
+
+| Custom variable | Default | Description |
+|-----------------|---------|-------------|
+| `leader-which-key-modifier-max-bindings` | 150 | Max bindings in modifier-prefix popup (nil = unlimited) |
+
+Modifier-prefix which-key (M-, C-M-) collects bindings from all active
+keymaps filtered by the modifier, with the modifier string as the popup header.
+In continuation the accumulated prefix is included in the header.
 
 ## Commands
 
-- `leader-mode` - Toggle the leader mode globally
+- `leader-mode` — global minor mode, toggle leader key support
 
 ## Variables
 
-- `leader-keys` - List of leader key configurations
-- `leader-pass-through-predicates` - List of predicates for pass-through
-- `leader-dispatch-priority` - Priority ordering for dispatch vs. command conflicts (default nil)
-
-## Comparison with Other Leader Key Packages
-
-### Overview
-
-| Feature | leader.el | general.el | bind-map | evil-leader |
-|---------|----------|------------|---------|------------|
-| Works without Evil | ✓ | ✓ | ✓ | ✗ |
-| Dynamic key translation | ✓ | ✗ | ✗ | ✗ |
-| Smart fallback (C-/plain) | ✓ | ✗ | ✗ | ✗ |
-| Modifier toggle | ✓ | ✗ | ✗ | ✗ |
-| Active development | ✓ | ✓ | ✓ | ✗ (deprecated) |
-
-### leader.el vs general.el
-
-general.el is a key-definition convenience library that can also provide leader-key functionality. It works with or without Evil.
-
-**general.el Pros:**
-- Mature (2016-), well-documented
-- Works with Evil states (normal, insert, visual, etc.)
-- Integrates with `use-package`
-- Rich key-definition DSL
-- Can define keys for multiple states at once
-- Works without Evil
-
-**general.el Cons:**
-- Uses static keymaps (not dynamic translation)
-- No smart fallback between C-/plain keys
-- No modifier toggle feature
-- Requires more boilerplate for simple leader use
-
-**leader.el Pros:**
-- Uses `key-translation-map` for universal interception
-- Smart modifier system with automatic fallback
-- Per-prefix modifier override
-- Dispatch entries apply at every level (in prefix keymaps too)
-- Toggle between different modifier states
-- Simple configuration format
-
-**leader.el Cons:**
-- Less mature (newer package)
-- No Evil state integration
-- Requires Emacs 28.1+
-
-### leader.el vs bind-map
-
-bind-map makes keymaps available across different leader keys and Evil states. It can work without Evil.
-
-**bind-map Pros:**
-- Works without Evil
-- Supports per-major-mode keymaps
-- Mature, stable
-
-**bind-map Cons:**
-- Uses static keymaps (not dynamic translation)
-- No smart fallback
-- No modifier toggle
-- More verbose configuration
-
-### leader.el vs evil-leader
-
-evil-leader is a simple Evil-specific leader key package that has not been updated since 2014. Deprecated.
-
-### Key Differences
-
-1. **Dynamic vs Static**: leader.el uses `key-translation-map` to dynamically translate keys, while general.el and bind-map use static keymaps attached to prefix keys.
-
-2. **Smart Fallback**: leader.el automatically tries `C-x C-f`, falls back to `C-x f` if no binding. Static keymaps require explicit fallback bindings.
-
-3. **Modifier Toggle**: leader.el can toggle between `C-` and plain keys on the fly (e.g., `SPC SPC` toggles), unique among all packages.
+- `leader-keys` — leader key configurations
+- `leader-pass-through-predicates` — predicates for pass-through
+- `leader-dispatch-priority` — dispatch vs. command priority
+- `leader-toggle-priority` — toggle vs. command priority
