@@ -2,7 +2,7 @@
 
 ;; Author: jixiuf
 ;; Keywords: convenience
-;; Package-Requires: ((emacs "30.1") (which-key nil))
+;; Package-Requires: ((emacs "30.1"))
 
 ;;; Commentary:
 ;;

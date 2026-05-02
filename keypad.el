@@ -2,7 +2,7 @@
 
 ;; Author: jixiuf
 ;; Keywords: convenience
-;; Version: 0.2
+;; Version: 0.2.0
 ;; URL: https://github.com/jixiuf/leader
 ;; Package-Requires: ((emacs "30.1"))
 
