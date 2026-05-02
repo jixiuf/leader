@@ -143,8 +143,8 @@ default-filling or conditional logic is needed."
   modifier                      ; "C-", "M-", nil
   fallback                      ; "C-", nil (always explicit)
   toggle-target                 ; "C-", nil
-  dispatch-alist                ; ((char . leader-context) ...)  ; root-level
-  local-dispatch-alist          ; ((char . leader-context) ...)  ; cont-only, nil=use root
+  dispatch-alist                ; ((char . context) ...)  ; root-level
+  local-dispatch-alist          ; ((char . context) ...) ; continuations only
   leader-char                   ; integer: leader key event
   pass-through-predicates)      ; nil=use global, list=per-key override
 
@@ -160,7 +160,8 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
         (t "C-")))
 
 (defun leader--normalize-prefix-plist (plist)
-  "Normalize a prefix PLIST into (PREFIX MODIFIER FALLBACK TOGGLE LOCAL-DISPATCH)."
+  "Normalize a prefix PLIST into:
+\(PREFIX MODIFIER FALLBACK TOGGLE LOCAL-DISPATCH)."
   (let* ((prefix (plist-get plist :prefix))
          (modifier (plist-get plist :modifier))
          (fallback (plist-get plist :fallback))
@@ -260,8 +261,8 @@ Otherwise, toggle MODIFIER on/off (non-nil → nil, nil → \"C-\")."
     (key-binding (kbd keystr))))
 
 (defun leader--resolve-key (prefix modifier fallback char)
-  "Resolve CHAR to (KEY-STRING . FALLBACK-P) using PREFIX, MODIFIER, and FALLBACK.
-Resolution order:
+  "Resolve CHAR to (KEY-STRING . FALLBACK-P).
+Uses PREFIX, MODIFIER, and FALLBACK.  Resolution order:
 - modifier non-nil: try MODIFIER+CHAR, else plain CHAR.
 - modifier nil: try plain CHAR, else FALLBACK+CHAR."
   (let* ((desc (single-key-description char))
@@ -327,10 +328,11 @@ Handles keymap objects and symbol variables holding keymaps."
                            (desc (key-description (vector meta-ev))))
                       (push-binding desc sub-def)))
                    ((consp sub-ev)
-                    (cl-loop for i from (car sub-ev) to (cdr sub-ev)
-                             for meta-ev = (event-apply-modifier i 'meta 27 "M-")
-                             for desc = (key-description (vector meta-ev))
-                             do (push-binding desc sub-def)))))
+                     (cl-loop for i from (car sub-ev) to (cdr sub-ev)
+                              for mev = (event-apply-modifier
+                                         i 'meta 27 "M-")
+                              for desc = (key-description (vector mev))
+                              do (push-binding desc sub-def)))))
                 def)))
             (t
              (let ((desc (key-description (vector ev))))
@@ -362,10 +364,11 @@ Iterates active keymaps directly and returns on first match."
                         (when (leader--lookup-key (concat prefix " " desc))
                           (throw 'found t)))))
                    ((consp sub-ev)
-                    (cl-loop for i from (car sub-ev) to (cdr sub-ev)
-                             for meta-ev = (event-apply-modifier i 'meta 27 "M-")
-                             for desc = (key-description (vector meta-ev))
-                             when (string-prefix-p target desc)
+                     (cl-loop for i from (car sub-ev) to (cdr sub-ev)
+                              for mev = (event-apply-modifier
+                                         i 'meta 27 "M-")
+                              for desc = (key-description (vector mev))
+                              when (string-prefix-p target desc)
                              when (leader--lookup-key (concat prefix " " desc))
                              do (throw 'found t)))))
                 def)))))
@@ -392,9 +395,12 @@ Uses PREDICATES if non-nil, otherwise `leader-pass-through-predicates'."
 
 (defun leader--prompt (keys modifier)
   "Build echo-area prompt string from KEYS and MODIFIER."
-  (if modifier
-      (format "%s [%s]-" keys modifier)
-    (format "%s -" keys)))
+  (let ((keys (if (or (null keys) (and (stringp keys) (string-empty-p keys)))
+                  ""
+                keys)))
+    (if modifier
+        (format "%s [%s]-" keys modifier)
+      (format "%s -" keys))))
 
 (defun leader--modifier-prefix-prompt (target prefix)
   "Build prompt for TARGET modifier-prefix reading with PREFIX."
@@ -620,8 +626,10 @@ Returns :done, :continue, or nil (toggle, re-read)."
   "Remove all leader key handlers from `key-translation-map'."
   (when leader--installed
     (dolist (ctx leader--normalized-config)
-      (let ((kv (kbd (key-description (vector (leader-context-leader-char ctx))))))
-        (define-key key-translation-map kv nil))))
+      (let ((char (leader-context-leader-char ctx)))
+        (define-key key-translation-map
+                    (kbd (key-description (vector char)))
+                    nil))))
   (setq leader--installed nil))
 
 (defun leader--install ()
@@ -629,9 +637,10 @@ Returns :done, :continue, or nil (toggle, re-read)."
   (leader--uninstall)
   (leader--normalize-config)
   (dolist (ctx leader--normalized-config)
-    (define-key key-translation-map
-                (kbd (key-description (vector (leader-context-leader-char ctx))))
-                (leader--make-handler ctx)))
+    (let ((char (leader-context-leader-char ctx)))
+      (define-key key-translation-map
+                  (kbd (key-description (vector char)))
+                  (leader--make-handler ctx))))
   (setq leader--installed t))
 
 ;;;###autoload
