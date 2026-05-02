@@ -1,5 +1,6 @@
 ;;; leader-test.el --- Tests for leader.el -*- lexical-binding: t; -*-
 
+(setq load-prefer-newer t)
 (require 'ert)
 (require 'leader)
 
