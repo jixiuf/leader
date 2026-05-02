@@ -494,8 +494,6 @@
                   '(?m ?x))
                  "M-x")))
 
-(provide 'keypad-test)
-
 (defun keypad-test-run ()
   "Run all leader tests."
   (ert-run-tests-batch-and-exit))

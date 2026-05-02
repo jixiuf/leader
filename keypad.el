@@ -1,9 +1,9 @@
-;;; keypad.el --- Leader key configuration -*- lexical-binding: t; -*-
+;;; keypad.el --- Translate leader keys to key sequences -*- lexical-binding: t; -*-
 
 ;; Author: jixiuf
 ;; Keywords: convenience
 ;; Version: 0.2.0
-;; URL: https://github.com/jixiuf/leader
+;; URL: https://github.com/jixiuf/emacs-keypad
 ;; Package-Requires: ((emacs "30.1"))
 
 ;; Copyright (C) 2026, jixiuf, all rights reserved.
