@@ -846,6 +846,7 @@ KEYS using standard which-key display.  Supports C-h n/p paging."
   (let ((which-key-inhibit t)
         (popup-shown-cell (list nil)))
     (which-key--hide-popup)
+    (message "%s" prompt)
     (when (leader--which-key-prepare keys modifier)
       (when (and (eq leader--event-reader #'read-event)
                  (sit-for which-key-idle-delay))
@@ -874,6 +875,8 @@ Returns the character read."
   (let ((which-key-inhibit t)
         (popup-shown-cell (list nil)))
     (leader--clear-which-key)
+    (message "%s" (leader--modifier-which-key-build-prompt
+                    target popup-shown-cell keys))
     (when (leader--modifier-which-key-prepare target keys)
       (when (sit-for which-key-idle-delay)
         (leader--modifier-which-key-show-popup popup-shown-cell)))
